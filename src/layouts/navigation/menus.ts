@@ -1,6 +1,6 @@
 import {
   LayoutDashboard, Users, Warehouse, CalendarCheck, Package,
-  ArrowLeftRight, CreditCard, UserCircle, Search, type LucideIcon,
+  ArrowLeftRight, CreditCard, UserCircle, Search, Store, FlaskConical, type LucideIcon,
 } from 'lucide-react';
 import type { Role } from '../../types/user';
 
@@ -23,14 +23,16 @@ export const MENUS: Record<Role, MenuItem[]> = {
     { label: 'ภาพรวม', to: '/tenant', icon: LayoutDashboard },
     { label: 'ค้นหาพื้นที่', to: '/spaces', icon: Search },
     { label: 'การจองของฉัน', to: '/tenant/bookings', icon: CalendarCheck },
+    { label: 'ร้านค้า & คลังสินค้า', to: '/tenant/store', icon: Store },
     { label: 'สินค้า', to: '/tenant/inventory/products', icon: Package },
     { label: 'รับเข้า / เบิกออก', to: '/tenant/inventory/movements', icon: ArrowLeftRight },
+    { label: 'API Sandbox', to: '/sandbox', icon: FlaskConical },
     { label: 'โปรไฟล์', to: '/tenant/profile', icon: UserCircle },
   ],
 };
 
 export const ROLE_LABEL: Record<Role, string> = {
   ADMIN: 'ผู้ดูแลระบบ',
-  OWNER: 'เจ้าของพื้นที่',
+  OWNER: 'เจ้าของหอพัก',
   TENANT: 'ผู้เช่า',
 };

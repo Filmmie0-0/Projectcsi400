@@ -14,6 +14,7 @@ const L = (el: ReactElement) => (
 const LandingPage = lazy(() => import('../pages/public/LandingPage'));
 const SpaceSearchPage = lazy(() => import('../pages/public/SpaceSearchPage'));
 const SpaceDetailPage = lazy(() => import('../pages/public/SpaceDetailPage'));
+const ApiSandboxPage = lazy(() => import('../pages/public/ApiSandboxPage'));
 const LoginPage = lazy(() => import('../pages/auth/LoginPage'));
 const RegisterPage = lazy(() => import('../pages/auth/RegisterPage'));
 
@@ -37,6 +38,7 @@ const ProductListPage = lazy(() => import('../pages/tenant/inventory/ProductList
 const ProductFormPage = lazy(() => import('../pages/tenant/inventory/ProductFormPage'));
 const StockMovementPage = lazy(() => import('../pages/tenant/inventory/StockMovementPage'));
 const TransactionHistoryPage = lazy(() => import('../pages/tenant/inventory/TransactionHistoryPage'));
+const StoreInventoryManager = lazy(() => import('../pages/tenant/store/StoreInventoryManager'));
 
 export const router = createBrowserRouter([
   {
@@ -45,6 +47,7 @@ export const router = createBrowserRouter([
       { path: '/', element: L(<LandingPage />) },
       { path: '/spaces', element: L(<SpaceSearchPage />) },
       { path: '/spaces/:id', element: L(<SpaceDetailPage />) },
+      { path: '/sandbox', element: L(<ApiSandboxPage />) },
     ],
   },
   {
@@ -87,6 +90,7 @@ export const router = createBrowserRouter([
               { path: '/tenant', element: L(<TenantDashboardPage />) },
               { path: '/tenant/bookings', element: L(<MyBookingsPage />) },
               { path: '/tenant/bookings/:id', element: L(<BookingDetailPage />) },
+              { path: '/tenant/store', element: L(<StoreInventoryManager />) },
               { path: '/tenant/inventory/products', element: L(<ProductListPage />) },
               { path: '/tenant/inventory/products/new', element: L(<ProductFormPage />) },
               { path: '/tenant/inventory/products/:id/edit', element: L(<ProductFormPage />) },

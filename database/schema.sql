@@ -201,9 +201,12 @@ BEGIN
                 WHEN 'OUTBOUND' THEN -NEW.quantity
                 ELSE NEW.quantity
               END;
-  INSERT INTO inventory_balances (product_id, booking_id, quantity_on_hand)
-  VALUES (NEW.product_id, NEW.booking_id, delta)
-  ON DUPLICATE KEY UPDATE quantity_on_hand = quantity_on_hand + delta;
+  UPDATE inventory_balances SET quantity_on_hand = quantity_on_hand + delta
+  WHERE product_id = NEW.product_id AND booking_id = NEW.booking_id;
+  IF ROW_COUNT() = 0 THEN
+    INSERT INTO inventory_balances (product_id, booking_id, quantity_on_hand)
+    VALUES (NEW.product_id, NEW.booking_id, delta);
+  END IF;
 END$$
 DELIMITER ;
 

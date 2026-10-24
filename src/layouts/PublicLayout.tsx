@@ -14,6 +14,7 @@ export default function PublicLayout() {
           </Link>
           <nav className="flex items-center gap-2 text-sm">
             <Link to="/spaces" className="rounded-lg px-3 py-2 text-espresso-700 hover:bg-cream-200">ค้นหาพื้นที่</Link>
+            <Link to="/sandbox" className="rounded-lg px-3 py-2 text-espresso-700 hover:bg-cream-200">API Sandbox</Link>
             <Link to="/login" className="rounded-lg bg-walnut-500 px-4 py-2 font-medium text-cream-50 hover:bg-walnut-600">เข้าสู่ระบบ</Link>
           </nav>
         </div>

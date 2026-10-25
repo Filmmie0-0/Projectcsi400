@@ -1,0 +1,16 @@
+{
+  "name": "mfc-gateway",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "express": "5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "http-proxy-middleware": "^3.0.10"
+  }
+}

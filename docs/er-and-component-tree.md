@@ -13,7 +13,7 @@ bookings 1:N inventory_transactions
 products M:N bookings  (via inventory_balances)
 tenants M:N spaces     (via bookings)
 
-## Dormitory & Wholesale (database/migrations/002_dormitory_wholesale.sql)
+## Dormitory & Wholesale (database/services/04_store_db.sql)
 
 users(owner) 1:N dormitories
 dormitories 1:N spaces

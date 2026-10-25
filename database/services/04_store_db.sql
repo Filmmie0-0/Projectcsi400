@@ -1,40 +1,15 @@
--- Dormitory Micro-Warehouse & Wholesale Web Service  |  MySQL 8.0.16+
--- Run after database/schema.sql (run once):
---   mysql -u root -p mfc_wms < database/migrations/002_dormitory_wholesale.sql
---
--- Roles: users.role 'OWNER' = DORM_OWNER (เจ้าของหอพัก), 'TENANT' = เจ้าของร้านขายส่ง, 'ADMIN'
-USE mfc_wms;
-
--- ───────────────────────── Dormitories ─────────────────────────
-CREATE TABLE dormitories (
-  dormitory_id  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  owner_id      BIGINT UNSIGNED NOT NULL,
-  name          VARCHAR(200) NOT NULL,
-  total_rooms   INT UNSIGNED NOT NULL,
-  phone         VARCHAR(20) NULL,
-  province      VARCHAR(100) NOT NULL,
-  district      VARCHAR(100) NULL,
-  address       TEXT NOT NULL,
-  latitude      DECIMAL(10,7) NULL,
-  longitude     DECIMAL(10,7) NULL,
-  is_active     TINYINT(1) NOT NULL DEFAULT 1,
-  created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (dormitory_id),
-  KEY idx_dorm_owner (owner_id),
-  KEY idx_dorm_province (province),
-  CONSTRAINT fk_dorm_owner  FOREIGN KEY (owner_id) REFERENCES users(user_id),
-  CONSTRAINT chk_dorm_rooms CHECK (total_rooms > 0)
-) ENGINE=InnoDB;
-
--- พื้นที่เช่าใต้หอพัก (spaces เดิม) ผูกกับหอพัก
-ALTER TABLE spaces
-  ADD COLUMN dormitory_id BIGINT UNSIGNED NULL AFTER owner_id,
-  ADD KEY idx_spaces_dorm (dormitory_id),
-  ADD CONSTRAINT fk_spaces_dorm FOREIGN KEY (dormitory_id) REFERENCES dormitories(dormitory_id);
+-- store-service  |  MySQL 8.0.16+
+-- ร้านค้า + คลังสินค้า (WMS) + ราคาส่ง + Open API สำหรับหอพัก
+-- tenant_id / created_by = users.user_id (auth_db), booking_id = bookings.booking_id (booking_db),
+-- dormitory_id = dormitories.dormitory_id (space_db)  — ไม่มี FK ข้าม database
+-- Roles: 'OWNER' = DORM_OWNER (เจ้าของหอพัก), 'TENANT' = เจ้าของร้านขายส่ง, 'ADMIN'
+SET NAMES utf8mb4;
+USE store_db;
 
 -- ───────────────────────── Stores ─────────────────────────
--- 1 booking ที่อนุมัติแล้ว = 1 ร้านค้า (dormitory_id ถูกเติมอัตโนมัติจาก booking → space)
+-- 1 booking ที่อนุมัติแล้ว = 1 ร้านค้า
+-- trg_store_before_insert เดิมต้อง JOIN bookings/spaces ข้าม database จึงย้ายไปตรวจใน store-service
+-- (POST /api/tenant/stores เรียก booking-service แล้วส่ง dormitory_id มาเอง)
 CREATE TABLE stores (
   store_id      BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   tenant_id     BIGINT UNSIGNED NOT NULL,
@@ -52,26 +27,48 @@ CREATE TABLE stores (
   PRIMARY KEY (store_id),
   UNIQUE KEY uq_store_booking (booking_id),
   UNIQUE KEY uq_store_dorm_name (dormitory_id, name),
-  KEY idx_store_tenant (tenant_id),
-  CONSTRAINT fk_store_tenant  FOREIGN KEY (tenant_id)    REFERENCES users(user_id),
-  CONSTRAINT fk_store_booking FOREIGN KEY (booking_id)   REFERENCES bookings(booking_id),
-  CONSTRAINT fk_store_dorm    FOREIGN KEY (dormitory_id) REFERENCES dormitories(dormitory_id)
+  KEY idx_store_tenant (tenant_id)
 ) ENGINE=InnoDB;
 
 -- ───────────────────────── Categories & Products ─────────────────────────
-ALTER TABLE product_categories
-  ADD COLUMN store_id   BIGINT UNSIGNED NULL AFTER tenant_id,
-  ADD COLUMN sort_order INT NOT NULL DEFAULT 0 AFTER name,
-  ADD KEY idx_category_store (store_id),
-  ADD CONSTRAINT fk_category_store FOREIGN KEY (store_id) REFERENCES stores(store_id) ON DELETE CASCADE;
+CREATE TABLE product_categories (
+  category_id  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id    BIGINT UNSIGNED NOT NULL,
+  store_id     BIGINT UNSIGNED NULL,
+  name         VARCHAR(100) NOT NULL,
+  sort_order   INT NOT NULL DEFAULT 0,
+  created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (category_id),
+  UNIQUE KEY uq_category_tenant_name (tenant_id, name),
+  KEY idx_category_store (store_id),
+  CONSTRAINT fk_category_store FOREIGN KEY (store_id) REFERENCES stores(store_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
 
 -- selling_price = ราคาขายปลีก, ราคาส่งอยู่ใน product_price_tiers
-ALTER TABLE products
-  ADD COLUMN store_id       BIGINT UNSIGNED NULL AFTER tenant_id,
-  ADD COLUMN units_per_case INT UNSIGNED NULL AFTER unit,
-  ADD KEY idx_product_store (store_id),
-  ADD CONSTRAINT fk_product_store FOREIGN KEY (store_id) REFERENCES stores(store_id),
-  ADD CONSTRAINT chk_product_case CHECK (units_per_case IS NULL OR units_per_case > 0);
+CREATE TABLE products (
+  product_id     BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  tenant_id      BIGINT UNSIGNED NOT NULL,
+  store_id       BIGINT UNSIGNED NULL,
+  category_id    BIGINT UNSIGNED NULL,
+  sku            VARCHAR(50) NOT NULL,
+  name           VARCHAR(200) NOT NULL,
+  description    TEXT NULL,
+  unit           VARCHAR(20) NOT NULL DEFAULT 'pcs',
+  units_per_case INT UNSIGNED NULL,
+  cost_price     DECIMAL(12,2) NULL,
+  selling_price  DECIMAL(12,2) NULL,
+  reorder_level  INT UNSIGNED NOT NULL DEFAULT 0,
+  image_url      VARCHAR(500) NULL,
+  is_active      TINYINT(1) NOT NULL DEFAULT 1,
+  created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (product_id),
+  UNIQUE KEY uq_product_tenant_sku (tenant_id, sku),
+  KEY idx_product_store (store_id),
+  CONSTRAINT fk_product_store    FOREIGN KEY (store_id)    REFERENCES stores(store_id),
+  CONSTRAINT fk_product_category FOREIGN KEY (category_id) REFERENCES product_categories(category_id) ON DELETE SET NULL,
+  CONSTRAINT chk_product_case    CHECK (units_per_case IS NULL OR units_per_case > 0)
+) ENGINE=InnoDB;
 
 -- ราคาขั้นบันได: ซื้อ >= min_qty ชิ้น ได้ราคา unit_price ต่อชิ้น
 CREATE TABLE product_price_tiers (
@@ -86,6 +83,35 @@ CREATE TABLE product_price_tiers (
   CONSTRAINT fk_tier_product FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE,
   CONSTRAINT chk_tier_qty    CHECK (min_qty >= 2),
   CONSTRAINT chk_tier_price  CHECK (unit_price >= 0)
+) ENGINE=InnoDB;
+
+-- ───────────────────────── Inventory ─────────────────────────
+CREATE TABLE inventory_transactions (
+  transaction_id    BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  product_id        BIGINT UNSIGNED NOT NULL,
+  booking_id        BIGINT UNSIGNED NOT NULL,
+  transaction_type  ENUM('INBOUND','OUTBOUND','ADJUSTMENT') NOT NULL,
+  quantity          INT NOT NULL,
+  reference_no      VARCHAR(100) NULL,
+  reason            VARCHAR(255) NULL,
+  transaction_date  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by        BIGINT UNSIGNED NOT NULL,
+  created_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (transaction_id),
+  KEY idx_tx_product_booking (product_id, booking_id),
+  KEY idx_tx_date (transaction_date),
+  CONSTRAINT fk_tx_product FOREIGN KEY (product_id) REFERENCES products(product_id),
+  CONSTRAINT chk_tx_qty    CHECK (quantity <> 0)
+) ENGINE=InnoDB;
+
+CREATE TABLE inventory_balances (
+  product_id        BIGINT UNSIGNED NOT NULL,
+  booking_id        BIGINT UNSIGNED NOT NULL,
+  quantity_on_hand  INT NOT NULL DEFAULT 0,
+  updated_at        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (product_id, booking_id),
+  CONSTRAINT fk_bal_product FOREIGN KEY (product_id) REFERENCES products(product_id),
+  CONSTRAINT chk_bal_qty    CHECK (quantity_on_hand >= 0)
 ) ENGINE=InnoDB;
 
 -- ───────────────────────── Open API ─────────────────────────
@@ -109,9 +135,7 @@ CREATE TABLE api_keys (
   UNIQUE KEY uq_api_key_prefix (key_prefix),
   UNIQUE KEY uq_api_key_hash (key_hash),
   KEY idx_api_key_dorm (dormitory_id, status),
-  CONSTRAINT fk_api_key_dorm  FOREIGN KEY (dormitory_id) REFERENCES dormitories(dormitory_id),
-  CONSTRAINT fk_api_key_store FOREIGN KEY (store_id)     REFERENCES stores(store_id) ON DELETE CASCADE,
-  CONSTRAINT fk_api_key_user  FOREIGN KEY (created_by)   REFERENCES users(user_id)
+  CONSTRAINT fk_api_key_store FOREIGN KEY (store_id) REFERENCES stores(store_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- ───────────────────────── External Orders ─────────────────────────
@@ -141,9 +165,8 @@ CREATE TABLE external_orders (
   UNIQUE KEY uq_order_idempotency (api_key_id, external_ref),
   KEY idx_order_store (store_id, status),
   KEY idx_order_billing (dormitory_id, billing_period, room_no, billing_status),
-  CONSTRAINT fk_order_store    FOREIGN KEY (store_id)     REFERENCES stores(store_id),
-  CONSTRAINT fk_order_dorm     FOREIGN KEY (dormitory_id) REFERENCES dormitories(dormitory_id),
-  CONSTRAINT fk_order_api_key  FOREIGN KEY (api_key_id)   REFERENCES api_keys(api_key_id),
+  CONSTRAINT fk_order_store    FOREIGN KEY (store_id)   REFERENCES stores(store_id),
+  CONSTRAINT fk_order_api_key  FOREIGN KEY (api_key_id) REFERENCES api_keys(api_key_id),
   CONSTRAINT chk_order_amounts CHECK (subtotal >= 0 AND discount_amount >= 0 AND total_amount >= 0),
   CONSTRAINT chk_order_period  CHECK (billing_period REGEXP '^[0-9]{4}-(0[1-9]|1[0-2])$')
 ) ENGINE=InnoDB;
@@ -170,9 +193,8 @@ CREATE TABLE external_order_items (
 -- ───────────────────────── Triggers ─────────────────────────
 DELIMITER $$
 
--- (จาก schema.sql) อัปเดตยอดคงเหลือทุกครั้งที่มี inventory_transactions
+-- อัปเดตยอดคงเหลือทุกครั้งที่มี inventory_transactions
 -- UPDATE ก่อน INSERT: ON DUPLICATE KEY UPDATE จะตรวจ chk_bal_qty กับแถวติดลบก่อนเสมอ ทำให้ OUTBOUND ล้มเหลว
-DROP TRIGGER IF EXISTS trg_inventory_after_insert$$
 CREATE TRIGGER trg_inventory_after_insert
 AFTER INSERT ON inventory_transactions
 FOR EACH ROW
@@ -189,31 +211,6 @@ BEGIN
     INSERT INTO inventory_balances (product_id, booking_id, quantity_on_hand)
     VALUES (NEW.product_id, NEW.booking_id, delta);
   END IF;
-END$$
-
--- ร้านต้องมาจาก booking ที่อนุมัติแล้วของผู้เช่าคนเดียวกัน
-CREATE TRIGGER trg_store_before_insert
-BEFORE INSERT ON stores
-FOR EACH ROW
-BEGIN
-  DECLARE v_tenant BIGINT UNSIGNED;
-  DECLARE v_status VARCHAR(20);
-  DECLARE v_dorm   BIGINT UNSIGNED;
-
-  SELECT b.tenant_id, b.status, s.dormitory_id INTO v_tenant, v_status, v_dorm
-  FROM bookings b JOIN spaces s ON s.space_id = b.space_id
-  WHERE b.booking_id = NEW.booking_id;
-
-  IF v_tenant IS NULL OR v_tenant <> NEW.tenant_id THEN
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Booking does not belong to this tenant';
-  END IF;
-  IF v_status <> 'APPROVED' THEN
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Booking must be APPROVED before creating a store';
-  END IF;
-  IF v_dorm IS NULL THEN
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Space is not linked to a dormitory';
-  END IF;
-  SET NEW.dormitory_id = v_dorm;
 END$$
 
 -- ตรวจ API key + ร้าน และเติม dormitory_id
@@ -361,26 +358,7 @@ END$$
 DELIMITER ;
 
 -- ───────────────────────── Views ─────────────────────────
--- (จาก schema.sql)
-CREATE OR REPLACE VIEW v_admin_summary AS
-SELECT
-  (SELECT COUNT(*) FROM users WHERE role='OWNER')  AS total_owners,
-  (SELECT COUNT(*) FROM users WHERE role='TENANT') AS total_tenants,
-  (SELECT COUNT(*) FROM spaces WHERE is_active=1)  AS total_spaces,
-  (SELECT COUNT(*) FROM bookings WHERE status='PENDING')  AS pending_bookings,
-  (SELECT COALESCE(SUM(amount),0) FROM payments WHERE status='VERIFIED') AS total_revenue;
-
-CREATE OR REPLACE VIEW v_owner_space_performance AS
-SELECT s.owner_id, s.space_id, s.name,
-       COUNT(DISTINCT b.booking_id) AS total_bookings,
-       COUNT(DISTINCT CASE WHEN b.status='APPROVED' THEN b.booking_id END) AS active_bookings,
-       COALESCE(SUM(CASE WHEN p.status='VERIFIED' THEN p.amount END),0) AS revenue
-FROM spaces s
-LEFT JOIN bookings b ON b.space_id = s.space_id
-LEFT JOIN payments p ON p.booking_id = b.booking_id
-GROUP BY s.owner_id, s.space_id, s.name;
-
-CREATE OR REPLACE VIEW v_tenant_low_stock AS
+CREATE VIEW v_tenant_low_stock AS
 SELECT p.tenant_id, p.product_id, p.sku, p.name, p.reorder_level,
        COALESCE(SUM(ib.quantity_on_hand),0) AS total_on_hand
 FROM products p
@@ -390,7 +368,7 @@ GROUP BY p.tenant_id, p.product_id, p.sku, p.name, p.reorder_level
 HAVING total_on_hand <= p.reorder_level;
 
 -- แคตตาล็อกสำหรับ Open API (GET products)
-CREATE OR REPLACE VIEW v_store_catalog AS
+CREATE VIEW v_store_catalog AS
 SELECT st.dormitory_id, st.store_id, st.name AS store_name, st.status AS store_status,
        p.product_id, p.sku, p.name, p.unit, p.units_per_case, c.name AS category_name,
        p.selling_price AS retail_price, p.image_url,
@@ -402,7 +380,7 @@ LEFT JOIN inventory_balances ib ON ib.product_id = p.product_id AND ib.booking_i
 WHERE p.is_active = 1;
 
 -- ยอดที่ต้องรวมเข้าบิลค่าหอ แยกตามห้อง/เดือน
-CREATE OR REPLACE VIEW v_dorm_room_billing AS
+CREATE VIEW v_dorm_room_billing AS
 SELECT dormitory_id, billing_period, room_no,
        COUNT(*) AS order_count,
        SUM(total_amount) AS amount_to_bill

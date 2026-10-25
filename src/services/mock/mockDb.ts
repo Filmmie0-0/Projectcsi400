@@ -1,5 +1,5 @@
 // In-browser mock ของ Web Service ใช้ตอนยังไม่มี backend (VITE_USE_MOCK != 'false')
-// กติกาเหมือน trigger ใน database/migrations/002_dormitory_wholesale.sql:
+// กติกาเหมือน trigger ใน database/services/04_store_db.sql:
 // ตรวจ API key / ร้านเปิด / สต็อกพอ → เลือกราคาขั้นบันได → ตัดสต็อก, external_ref ซ้ำ = ออเดอร์เดิม
 // ข้อมูลเก็บใน localStorage และแจ้งทุกแท็บผ่าน BroadcastChannel (เปิด 2 แท็บเพื่อดูสต็อกลดแบบ real-time)
 import type { Space, SpaceSearchParams } from '../../types/space';

@@ -1,0 +1,12 @@
+{
+  "name": "mfc-wms-backend",
+  "private": true,
+  "scripts": {
+    "stack:up": "docker compose up -d --build",
+    "stack:down": "docker compose down",
+    "stack:logs": "docker compose logs -f",
+    "db:up": "docker compose up -d --build db phpmyadmin",
+    "db:reset": "docker compose down -v && docker compose up -d --build",
+    "db:shell": "docker compose exec db mysql -uroot -proot --default-character-set=utf8mb4"
+  }
+}

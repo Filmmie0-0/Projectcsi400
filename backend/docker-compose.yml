@@ -1,0 +1,124 @@
+<<<<<<< HEAD:docker-compose.yml
+# ชื่อ project ใหม่ = volume ใหม่ (renocare_mysql_data) ไม่ชนกับ volume ของระบบเดิม
+name: renocare
+
+=======
+name: projectcsi400
+>>>>>>> 6aca8a91bcd6df99dcd651a81e703215097c3458:backend/docker-compose.yml
+x-service-db: &service-db
+  DB_HOST: db
+  DB_PORT: 3306
+
+services:
+  db:
+    build: ./database
+    image: renocare_db:latest
+    container_name: renocare_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      # ใช้ใน database/services/00_create_service_dbs.sh ตอนสร้าง user ของแต่ละ service
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:-auth_pass}
+      JOB_DB_PASSWORD: ${JOB_DB_PASSWORD:-job_pass}
+      INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:-inventory_pass}
+      TZ: Asia/Bangkok
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+07:00
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    volumes:
+      # schema ของแต่ละ service ถูก COPY เข้า image (database/Dockerfile)
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  phpmyadmin:
+    image: phpmyadmin:5.2.1
+    container_name: renocare_phpmyadmin
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PMA_HOST: db
+      PMA_PORT: 3306
+      UPLOAD_LIMIT: 64M
+    ports:
+      - "${PHPMYADMIN_PORT:-8081}:80"
+
+  # ───────────── Microservices (เข้าจากภายนอกผ่าน gateway เท่านั้น) ─────────────
+  auth-service:
+    build: ./services/auth-service
+    container_name: renocare_auth_service
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *service-db
+      PORT: 4001
+      DB_NAME: auth_db
+      DB_USER: auth_svc
+      DB_PASSWORD: ${AUTH_DB_PASSWORD:-auth_pass}
+<<<<<<< HEAD:docker-compose.yml
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+=======
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-}
+      NODE_ENV: ${NODE_ENV:-development}
+>>>>>>> 6aca8a91bcd6df99dcd651a81e703215097c3458:backend/docker-compose.yml
+
+  job-service:
+    build: ./services/job-service
+    container_name: renocare_job_service
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *service-db
+      PORT: 4002
+      DB_NAME: job_db
+      DB_USER: job_svc
+      DB_PASSWORD: ${JOB_DB_PASSWORD:-job_pass}
+      AUTH_SERVICE_URL: http://auth-service:4001
+
+  inventory-service:
+    build: ./services/inventory-service
+    container_name: renocare_inventory_service
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *service-db
+      PORT: 4003
+      DB_NAME: inventory_db
+      DB_USER: inventory_svc
+      DB_PASSWORD: ${INVENTORY_DB_PASSWORD:-inventory_pass}
+      JOB_SERVICE_URL: http://job-service:4002
+
+  gateway:
+    build: ./services/gateway
+    container_name: renocare_gateway
+    restart: unless-stopped
+    depends_on:
+      - auth-service
+      - job-service
+      - inventory-service
+    environment:
+      PORT: 3000
+      AUTH_SERVICE_URL: http://auth-service:4001
+      JOB_SERVICE_URL: http://job-service:4002
+      INVENTORY_SERVICE_URL: http://inventory-service:4003
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+    ports:
+      - "${GATEWAY_PORT:-3000}:3000"
+
+volumes:
+  mysql_data:

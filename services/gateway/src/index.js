@@ -1,19 +1,25 @@
+import crypto from 'node:crypto';
 import express from 'express';
+import jwt from 'jsonwebtoken';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 
 // API Gateway: frontend เรียกที่เดียว (VITE_API_URL=http://localhost:3000/api) แล้วส่งต่อตาม path
-// /internal/* ของแต่ละ service ไม่ถูกส่งต่อ จึงเรียกได้จากในเครือข่าย docker เท่านั้น
+// - ตรวจ JWT ที่นี่ที่เดียว แล้วส่ง X-User-Id / X-User-Role / X-User-Name ให้ service ปลายทาง
+// - /api/partner/* ไม่ใช้ JWT: job-service ตรวจ X-API-Key ของระบบพาร์ทเนอร์เอง
+// - /internal/* ของแต่ละ service ไม่ถูกส่งต่อ จึงเรียกได้จากในเครือข่าย docker เท่านั้น
 const AUTH = process.env.AUTH_SERVICE_URL ?? 'http://localhost:4001';
-const SPACE = process.env.SPACE_SERVICE_URL ?? 'http://localhost:4002';
-const BOOKING = process.env.BOOKING_SERVICE_URL ?? 'http://localhost:4003';
-const STORE = process.env.STORE_SERVICE_URL ?? 'http://localhost:4004';
+const JOB = process.env.JOB_SERVICE_URL ?? 'http://localhost:4002';
+const INVENTORY = process.env.INVENTORY_SERVICE_URL ?? 'http://localhost:4003';
+const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
+const MOCK_PARTNER_SECRET = process.env.MOCK_PARTNER_WEBHOOK_SECRET ?? 'whsec_dormbook_demo';
 
 const routes = [
-  { prefixes: ['/api/auth'], target: AUTH },
-  { prefixes: ['/api/spaces', '/api/dormitories'], target: SPACE },
-  { prefixes: ['/api/booking', '/api/bookings', '/api/payments'], target: BOOKING },
-  { prefixes: ['/api/tenant', '/api/inventory', '/api/product', '/api/open'], target: STORE },
+  { prefixes: ['/api/auth', '/api/users'], target: AUTH },
+  { prefixes: ['/api/jobs', '/api/buildings', '/api/contracts', '/api/invoices', '/api/partners', '/api/partner'], target: JOB },
+  { prefixes: ['/api/materials', '/api/stock', '/api/requisitions'], target: INVENTORY },
 ];
+
+const PUBLIC_PATHS = ['/api/auth/login', '/api/auth/register', '/api/mock-partner/events'];
 
 const app = express();
 
@@ -26,7 +32,7 @@ app.use((req, res, next) => {
 });
 
 app.get('/health', async (_req, res) => {
-  const services = { auth: AUTH, space: SPACE, booking: BOOKING, store: STORE };
+  const services = { auth: AUTH, job: JOB, inventory: INVENTORY };
   const results = await Promise.all(
     Object.entries(services).map(async ([name, url]) => {
       try {
@@ -37,19 +43,55 @@ app.get('/health', async (_req, res) => {
       }
     }),
   );
-  const status = Object.fromEntries(results);
-  res.status(results.every(([, s]) => s === 'ok') ? 200 : 503).json(status);
+  res.status(results.every(([, s]) => s === 'ok') ? 200 : 503).json(Object.fromEntries(results));
 });
 
-// v_admin_summary เดิม: ตอนนี้ข้อมูลอยู่ 3 database จึงรวมที่ gateway
-app.get('/api/admin/summary', async (_req, res) => {
+// ── ระบบจองห้องพักจำลอง (แทนระบบของเพื่อนตอนเดโม ลบออกเมื่อเชื่อมระบบจริง) ──
+// job-service ส่ง webhook มาที่ http://gateway:3000/mock-partner/webhook แล้วหน้า Partner Sandbox อ่านผ่าน /api/mock-partner/events
+const partnerInbox = [];
+
+app.post('/mock-partner/webhook', express.raw({ type: '*/*' }), (req, res) => {
+  const expected = crypto.createHmac('sha256', MOCK_PARTNER_SECRET).update(req.body).digest('hex');
+  const valid = req.get('X-Signature') === `sha256=${expected}`;
+  partnerInbox.unshift({ receivedAt: new Date().toISOString(), signatureValid: valid, body: JSON.parse(req.body.toString()) });
+  partnerInbox.length = Math.min(partnerInbox.length, 50);
+  res.status(valid ? 200 : 401).json({ ok: valid });
+});
+
+app.get('/api/mock-partner/events', (_req, res) => res.json(partnerInbox));
+
+// ── Auth: ล้าง header ที่ client ปลอมมา แล้วใส่ข้อมูลจาก JWT ──
+app.use('/api', (req, res, next) => {
+  delete req.headers['x-user-id'];
+  delete req.headers['x-user-role'];
+  delete req.headers['x-user-name'];
+  if (PUBLIC_PATHS.includes(req.originalUrl.split('?')[0]) || req.originalUrl.startsWith('/api/partner/')) return next();
+
+  const token = req.get('Authorization')?.replace(/^Bearer /, '');
+  if (!token) return res.status(401).json({ code: 'UNAUTHORIZED', message: 'กรุณาเข้าสู่ระบบ' });
   try {
-    const [users, spaces, bookings] = await Promise.all(
-      [AUTH, SPACE, BOOKING].map((url) => fetch(`${url}/internal/summary`).then((r) => r.json())),
+    const claims = jwt.verify(token, JWT_SECRET);
+    req.headers['x-user-id'] = String(claims.sub);
+    req.headers['x-user-role'] = claims.role;
+    req.headers['x-user-name'] = encodeURIComponent(claims.name);
+    next();
+  } catch {
+    res.status(401).json({ code: 'TOKEN_EXPIRED', message: 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่' });
+  }
+});
+
+// แดชบอร์ดแอดมิน: ข้อมูลอยู่ 3 database จึงรวมที่ gateway
+app.get('/api/admin/summary', async (req, res) => {
+  if (req.headers['x-user-role'] !== 'ADMIN') return res.status(403).json({ code: 'FORBIDDEN', message: 'สำหรับผู้ดูแลระบบ' });
+  try {
+    const [users, jobs, inventory] = await Promise.all(
+      [AUTH, JOB, INVENTORY].map((url) => fetch(`${url}/internal/summary`).then((r) => r.json())),
     );
-    res.json({ ...users, ...spaces, ...bookings });
+    const merged = { ...users, ...jobs, ...inventory };
+    // view ใน DB เป็น snake_case → API เป็น camelCase เหมือน endpoint อื่น
+    res.json(Object.fromEntries(Object.entries(merged).map(([k, v]) => [k.replace(/_([a-z])/g, (_, c) => c.toUpperCase()), Number(v)])));
   } catch (err) {
-    res.status(502).json({ message: 'Failed to aggregate summary', error: err.message });
+    res.status(502).json({ code: 'UPSTREAM_ERROR', message: 'Failed to aggregate summary', error: err.message });
   }
 });
 
@@ -57,7 +99,7 @@ for (const { prefixes, target } of routes) {
   app.use(createProxyMiddleware({ target, pathFilter: prefixes, changeOrigin: true }));
 }
 
-app.use('/api', (_req, res) => res.status(404).json({ message: 'No service for this path' }));
+app.use('/api', (_req, res) => res.status(404).json({ code: 'NOT_FOUND', message: 'No service for this path' }));
 
 const port = Number(process.env.PORT ?? 3000);
 app.listen(port, () => console.log(`gateway listening on :${port}`));

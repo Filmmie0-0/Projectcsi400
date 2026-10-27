@@ -12,42 +12,32 @@ const L = (el: ReactElement) => (
 );
 
 const LandingPage = lazy(() => import('../pages/public/LandingPage'));
-const SpaceSearchPage = lazy(() => import('../pages/public/SpaceSearchPage'));
-const SpaceDetailPage = lazy(() => import('../pages/public/SpaceDetailPage'));
-const ApiSandboxPage = lazy(() => import('../pages/public/ApiSandboxPage'));
+const PartnerSandboxPage = lazy(() => import('../pages/public/PartnerSandboxPage'));
 const LoginPage = lazy(() => import('../pages/auth/LoginPage'));
 const RegisterPage = lazy(() => import('../pages/auth/RegisterPage'));
 
+// หน้าที่ใช้ร่วมกันหลาย role (เนื้อหาเปลี่ยนตาม role)
+const JobListPage = lazy(() => import('../pages/jobs/JobListPage'));
+const JobDetailPage = lazy(() => import('../pages/jobs/JobDetailPage'));
+const BillingPage = lazy(() => import('../pages/billing/BillingPage'));
+const RequisitionsPage = lazy(() => import('../pages/inventory/RequisitionsPage'));
+
 const AdminDashboardPage = lazy(() => import('../pages/admin/AdminDashboardPage'));
-const UserManagementPage = lazy(() => import('../pages/admin/UserManagementPage'));
-const SpaceApprovalPage = lazy(() => import('../pages/admin/SpaceApprovalPage'));
-const BookingOverviewPage = lazy(() => import('../pages/admin/BookingOverviewPage'));
-const PaymentVerifyPage = lazy(() => import('../pages/admin/PaymentVerifyPage'));
+const UsersPage = lazy(() => import('../pages/admin/UsersPage'));
+const PartnersPage = lazy(() => import('../pages/admin/PartnersPage'));
+const MaterialsPage = lazy(() => import('../pages/inventory/MaterialsPage'));
 
-const OwnerDashboardPage = lazy(() => import('../pages/owner/OwnerDashboardPage'));
-const MySpacesPage = lazy(() => import('../pages/owner/MySpacesPage'));
-const SpaceFormPage = lazy(() => import('../pages/owner/SpaceFormPage'));
-const BookingRequestsPage = lazy(() => import('../pages/owner/BookingRequestsPage'));
-const OwnerBookingDetailPage = lazy(() => import('../pages/owner/OwnerBookingDetailPage'));
+const UserDashboardPage = lazy(() => import('../pages/user/UserDashboardPage'));
+const NewJobPage = lazy(() => import('../pages/user/NewJobPage'));
 
-const TenantDashboardPage = lazy(() => import('../pages/tenant/TenantDashboardPage'));
-const MyBookingsPage = lazy(() => import('../pages/tenant/MyBookingsPage'));
-const BookingDetailPage = lazy(() => import('../pages/tenant/BookingDetailPage'));
-const ProfilePage = lazy(() => import('../pages/tenant/ProfilePage'));
-const ProductListPage = lazy(() => import('../pages/tenant/inventory/ProductListPage'));
-const ProductFormPage = lazy(() => import('../pages/tenant/inventory/ProductFormPage'));
-const StockMovementPage = lazy(() => import('../pages/tenant/inventory/StockMovementPage'));
-const TransactionHistoryPage = lazy(() => import('../pages/tenant/inventory/TransactionHistoryPage'));
-const StoreInventoryManager = lazy(() => import('../pages/tenant/store/StoreInventoryManager'));
+const TechDashboardPage = lazy(() => import('../pages/technician/TechDashboardPage'));
 
 export const router = createBrowserRouter([
   {
     element: <PublicLayout />,
     children: [
       { path: '/', element: L(<LandingPage />) },
-      { path: '/spaces', element: L(<SpaceSearchPage />) },
-      { path: '/spaces/:id', element: L(<SpaceDetailPage />) },
-      { path: '/sandbox', element: L(<ApiSandboxPage />) },
+      { path: '/sandbox', element: L(<PartnerSandboxPage />) },
     ],
   },
   {
@@ -63,41 +53,35 @@ export const router = createBrowserRouter([
       {
         element: <DashboardLayout />,
         children: [
+          { path: '/jobs', element: L(<JobListPage />) },
+          { path: '/jobs/:id', element: L(<JobDetailPage />) },
+          {
+            element: <RoleRoute allow={['ADMIN', 'USER']} />,
+            children: [{ path: '/billing', element: L(<BillingPage />) }],
+          },
+          {
+            element: <RoleRoute allow={['ADMIN', 'TECHNICIAN']} />,
+            children: [{ path: '/requisitions', element: L(<RequisitionsPage />) }],
+          },
           {
             element: <RoleRoute allow={['ADMIN']} />,
             children: [
               { path: '/admin', element: L(<AdminDashboardPage />) },
-              { path: '/admin/users', element: L(<UserManagementPage />) },
-              { path: '/admin/spaces', element: L(<SpaceApprovalPage />) },
-              { path: '/admin/bookings', element: L(<BookingOverviewPage />) },
-              { path: '/admin/payments', element: L(<PaymentVerifyPage />) },
+              { path: '/admin/users', element: L(<UsersPage />) },
+              { path: '/admin/partners', element: L(<PartnersPage />) },
+              { path: '/admin/materials', element: L(<MaterialsPage />) },
             ],
           },
           {
-            element: <RoleRoute allow={['OWNER']} />,
+            element: <RoleRoute allow={['USER']} />,
             children: [
-              { path: '/owner', element: L(<OwnerDashboardPage />) },
-              { path: '/owner/spaces', element: L(<MySpacesPage />) },
-              { path: '/owner/spaces/new', element: L(<SpaceFormPage />) },
-              { path: '/owner/spaces/:id/edit', element: L(<SpaceFormPage />) },
-              { path: '/owner/bookings', element: L(<BookingRequestsPage />) },
-              { path: '/owner/bookings/:id', element: L(<OwnerBookingDetailPage />) },
+              { path: '/user', element: L(<UserDashboardPage />) },
+              { path: '/user/jobs/new', element: L(<NewJobPage />) },
             ],
           },
           {
-            element: <RoleRoute allow={['TENANT']} />,
-            children: [
-              { path: '/tenant', element: L(<TenantDashboardPage />) },
-              { path: '/tenant/bookings', element: L(<MyBookingsPage />) },
-              { path: '/tenant/bookings/:id', element: L(<BookingDetailPage />) },
-              { path: '/tenant/store', element: L(<StoreInventoryManager />) },
-              { path: '/tenant/inventory/products', element: L(<ProductListPage />) },
-              { path: '/tenant/inventory/products/new', element: L(<ProductFormPage />) },
-              { path: '/tenant/inventory/products/:id/edit', element: L(<ProductFormPage />) },
-              { path: '/tenant/inventory/movements', element: L(<StockMovementPage />) },
-              { path: '/tenant/inventory/history', element: L(<TransactionHistoryPage />) },
-              { path: '/tenant/profile', element: L(<ProfilePage />) },
-            ],
+            element: <RoleRoute allow={['TECHNICIAN']} />,
+            children: [{ path: '/tech', element: L(<TechDashboardPage />) }],
           },
         ],
       },

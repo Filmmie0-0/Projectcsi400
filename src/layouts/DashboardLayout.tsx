@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Warehouse, Bell, Menu, X, LogOut } from 'lucide-react';
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Hammer, Menu, X, LogOut } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { MENUS, ROLE_LABEL } from './navigation/menus';
 
@@ -21,9 +21,9 @@ export default function DashboardLayout() {
     <div className="flex h-full flex-col">
       <div className="flex h-16 items-center gap-2 border-b border-line px-6">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-walnut-500">
-          <Warehouse className="h-5 w-5 text-cream-50" />
+          <Hammer className="h-5 w-5 text-cream-50" />
         </div>
-        <span className="text-lg font-semibold tracking-tight text-espresso-900">MicroFulfill</span>
+        <span className="text-lg font-semibold tracking-tight text-espresso-900">RenoCare</span>
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
@@ -104,13 +104,13 @@ export default function DashboardLayout() {
           </div>
 
           <div className="flex items-center gap-2">
-            <button className="relative rounded-full p-2 text-espresso-700 hover:bg-cream-200">
-              <Bell className="h-5 w-5" />
-              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-danger ring-2 ring-cream-50" />
-            </button>
-            <button className="rounded-lg bg-sand-200 px-4 py-2 text-sm font-medium text-espresso-900 transition-colors hover:bg-sand-300">
-              ช่วยเหลือ
-            </button>
+            <span className="rounded-full bg-walnut-50 px-3 py-1 text-xs font-medium text-walnut-700">{ROLE_LABEL[user.role]}</span>
+            <Link
+              to="/sandbox"
+              className="rounded-lg bg-sand-200 px-4 py-2 text-sm font-medium text-espresso-900 transition-colors hover:bg-sand-300"
+            >
+              Partner Sandbox
+            </Link>
           </div>
         </header>
 

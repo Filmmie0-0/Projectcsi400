@@ -1,29 +1,75 @@
-import { useNavigate } from 'react-router-dom';
+import { useState, type FormEvent } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import Button from '../../components/ui/Button';
+import Input from '../../components/ui/Input';
+import { ErrorText } from '../../components/common/QueryState';
 import { useAuthStore } from '../../store/authStore';
-import type { Role } from '../../types/user';
+import { authService } from '../../services/authService';
+import { ROLE_HOME } from '../../layouts/navigation/menus';
 
-const HOME: Record<Role, string> = { ADMIN: '/admin', OWNER: '/owner', TENANT: '/tenant' };
+// บัญชีเดโมจาก database/services/01_auth_db.sql (รหัสผ่าน password123)
+const DEMO = [
+  { label: 'แอดมิน', email: 'admin@renocare.local' },
+  { label: 'ลูกค้า (เจ้าของหอ)', email: 'owner@renocare.local' },
+  { label: 'ลูกค้า (DormBook)', email: 'partner@dormbook.local' },
+  { label: 'ช่างเอก', email: 'tech1@renocare.local' },
+  { label: 'ช่างบี', email: 'tech2@renocare.local' },
+];
 
-// DEMO ONLY: เลือก role เพื่อทดสอบ layout — ให้แทนที่ด้วย API จริง (authService)
 export default function LoginPage() {
   const login = useAuthStore((s) => s.login);
   const navigate = useNavigate();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<unknown>(null);
+  const [loading, setLoading] = useState(false);
 
-  const demo = (role: Role, fullName: string) => {
-    login({ userId: 1, email: `${role.toLowerCase()}@demo.com`, fullName, role }, 'demo-token');
-    navigate(HOME[role]);
+  const submit = async (e?: FormEvent, creds = { email, password }) => {
+    e?.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      const { user, token } = await authService.login(creds.email, creds.password);
+      login(user, token);
+      navigate(ROLE_HOME[user.role]);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold text-espresso-900">เข้าสู่ระบบ</h1>
-        <p className="mt-1 text-sm text-espresso-500">โหมดทดลอง: เลือกบทบาทเพื่อดูหน้าจอ</p>
+        <h1 className="text-xl font-semibold text-espresso-900">เข้าสู่ระบบ RenoCare</h1>
+        <p className="mt-1 text-sm text-espresso-500">ระบบรับงานตรวจห้องเช่าและรีโนเวทพื้นที่</p>
       </div>
-      <Button className="w-full" onClick={() => demo('TENANT', 'สมชาย ผู้เช่า')}>เข้าในฐานะผู้เช่า</Button>
-      <Button className="w-full" variant="secondary" onClick={() => demo('OWNER', 'สมหญิง เจ้าของพื้นที่')}>เข้าในฐานะเจ้าของพื้นที่</Button>
-      <Button className="w-full" variant="ghost" onClick={() => demo('ADMIN', 'แอดมิน')}>เข้าในฐานะผู้ดูแลระบบ</Button>
+      <form onSubmit={submit} className="space-y-3">
+        <Input label="อีเมล" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        <Input label="รหัสผ่าน" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <ErrorText error={error} />
+        <Button className="w-full" disabled={loading}>{loading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}</Button>
+      </form>
+      <div className="border-t border-line pt-4">
+        <p className="mb-2 text-xs font-medium text-espresso-500">บัญชีเดโม (รหัสผ่าน password123)</p>
+        <div className="flex flex-wrap gap-2">
+          {DEMO.map((d) => (
+            <button
+              key={d.email}
+              type="button"
+              disabled={loading}
+              onClick={() => submit(undefined, { email: d.email, password: 'password123' })}
+              className="rounded-full bg-cream-200 px-3 py-1 text-xs text-espresso-700 hover:bg-sand-200"
+            >
+              {d.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="text-center text-sm text-espresso-500">
+        ยังไม่มีบัญชี? <Link to="/register" className="font-medium text-walnut-600 hover:underline">สมัครเป็นลูกค้า</Link>
+      </p>
     </div>
   );
 }

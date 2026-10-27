@@ -1,19 +1,15 @@
-import type { BookingStatus } from '../../types/booking';
+import Badge from '../ui/Badge';
+import { CONTRACT_STATUS, INVOICE_STATUS, JOB_STATUS, REQUISITION_STATUS } from '../../constants/labels';
 
-const STYLE: Record<BookingStatus, { label: string; cls: string }> = {
-  PENDING: { label: 'รอตรวจสอบ', cls: 'bg-warning-soft text-warning' },
-  APPROVED: { label: 'อนุมัติแล้ว', cls: 'bg-success-soft text-success' },
-  REJECTED: { label: 'ไม่อนุมัติ', cls: 'bg-danger-soft text-danger' },
-  CANCELLED: { label: 'ยกเลิก', cls: 'bg-cream-200 text-espresso-500' },
-  EXPIRED: { label: 'หมดอายุ', cls: 'bg-cream-200 text-espresso-500' },
-  COMPLETED: { label: 'เสร็จสิ้น', cls: 'bg-info-soft text-info' },
-};
+const MAPS = { job: JOB_STATUS, contract: CONTRACT_STATUS, invoice: INVOICE_STATUS, requisition: REQUISITION_STATUS };
 
-export default function StatusBadge({ status }: { status: BookingStatus }) {
-  const { label, cls } = STYLE[status];
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${cls}`}>
-      {label}
-    </span>
-  );
+type Props =
+  | { kind: 'job'; status: keyof typeof JOB_STATUS }
+  | { kind: 'contract'; status: keyof typeof CONTRACT_STATUS }
+  | { kind: 'invoice'; status: keyof typeof INVOICE_STATUS }
+  | { kind: 'requisition'; status: keyof typeof REQUISITION_STATUS };
+
+export default function StatusBadge({ kind, status }: Props) {
+  const { label, tone } = (MAPS[kind] as Record<string, { label: string; tone: Parameters<typeof Badge>[0]['tone'] }>)[status];
+  return <Badge tone={tone}>{label}</Badge>;
 }

@@ -1,3 +1,6 @@
+# ชื่อ project ใหม่ = volume ใหม่ (renocare_mysql_data) ไม่ชนกับ volume ของระบบเดิม
+name: renocare
+
 x-service-db: &service-db
   DB_HOST: db
   DB_PORT: 3306
@@ -5,16 +8,15 @@ x-service-db: &service-db
 services:
   db:
     build: ./database
-    image: mfc_wms_db:latest
-    container_name: mfc_wms_db
+    image: renocare_db:latest
+    container_name: renocare_db
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       # ใช้ใน database/services/00_create_service_dbs.sh ตอนสร้าง user ของแต่ละ service
       AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:-auth_pass}
-      SPACE_DB_PASSWORD: ${SPACE_DB_PASSWORD:-space_pass}
-      BOOKING_DB_PASSWORD: ${BOOKING_DB_PASSWORD:-booking_pass}
-      STORE_DB_PASSWORD: ${STORE_DB_PASSWORD:-store_pass}
+      JOB_DB_PASSWORD: ${JOB_DB_PASSWORD:-job_pass}
+      INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:-inventory_pass}
       TZ: Asia/Bangkok
     command:
       - --character-set-server=utf8mb4
@@ -33,7 +35,7 @@ services:
 
   phpmyadmin:
     image: phpmyadmin:5.2.1
-    container_name: mfc_wms_phpmyadmin
+    container_name: renocare_phpmyadmin
     restart: unless-stopped
     depends_on:
       db:
@@ -48,7 +50,7 @@ services:
   # ───────────── Microservices (เข้าจากภายนอกผ่าน gateway เท่านั้น) ─────────────
   auth-service:
     build: ./services/auth-service
-    container_name: mfc_auth_service
+    container_name: renocare_auth_service
     restart: unless-stopped
     depends_on:
       db:
@@ -59,10 +61,11 @@ services:
       DB_NAME: auth_db
       DB_USER: auth_svc
       DB_PASSWORD: ${AUTH_DB_PASSWORD:-auth_pass}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
 
-  space-service:
-    build: ./services/space-service
-    container_name: mfc_space_service
+  job-service:
+    build: ./services/job-service
+    container_name: renocare_job_service
     restart: unless-stopped
     depends_on:
       db:
@@ -70,13 +73,14 @@ services:
     environment:
       <<: *service-db
       PORT: 4002
-      DB_NAME: space_db
-      DB_USER: space_svc
-      DB_PASSWORD: ${SPACE_DB_PASSWORD:-space_pass}
+      DB_NAME: job_db
+      DB_USER: job_svc
+      DB_PASSWORD: ${JOB_DB_PASSWORD:-job_pass}
+      AUTH_SERVICE_URL: http://auth-service:4001
 
-  booking-service:
-    build: ./services/booking-service
-    container_name: mfc_booking_service
+  inventory-service:
+    build: ./services/inventory-service
+    container_name: renocare_inventory_service
     restart: unless-stopped
     depends_on:
       db:
@@ -84,41 +88,25 @@ services:
     environment:
       <<: *service-db
       PORT: 4003
-      DB_NAME: booking_db
-      DB_USER: booking_svc
-      DB_PASSWORD: ${BOOKING_DB_PASSWORD:-booking_pass}
-      SPACE_SERVICE_URL: http://space-service:4002
-
-  store-service:
-    build: ./services/store-service
-    container_name: mfc_store_service
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      <<: *service-db
-      PORT: 4004
-      DB_NAME: store_db
-      DB_USER: store_svc
-      DB_PASSWORD: ${STORE_DB_PASSWORD:-store_pass}
-      BOOKING_SERVICE_URL: http://booking-service:4003
+      DB_NAME: inventory_db
+      DB_USER: inventory_svc
+      DB_PASSWORD: ${INVENTORY_DB_PASSWORD:-inventory_pass}
+      JOB_SERVICE_URL: http://job-service:4002
 
   gateway:
     build: ./services/gateway
-    container_name: mfc_gateway
+    container_name: renocare_gateway
     restart: unless-stopped
     depends_on:
       - auth-service
-      - space-service
-      - booking-service
-      - store-service
+      - job-service
+      - inventory-service
     environment:
       PORT: 3000
       AUTH_SERVICE_URL: http://auth-service:4001
-      SPACE_SERVICE_URL: http://space-service:4002
-      BOOKING_SERVICE_URL: http://booking-service:4003
-      STORE_SERVICE_URL: http://store-service:4004
+      JOB_SERVICE_URL: http://job-service:4002
+      INVENTORY_SERVICE_URL: http://inventory-service:4003
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
     ports:
       - "${GATEWAY_PORT:-3000}:3000"

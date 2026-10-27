@@ -1,91 +1,72 @@
-# MicroFulfill — Micro-Fulfillment Space Matching & Basic WMS
+# RenoCare — ตรวจสอบห้องเช่า & รีโนเวทพื้นที่ (Partner Web Service)
 
-Frontend: React 18 + TypeScript + Vite + Tailwind CSS (ธีม Minimalist Brown)
-Database: MySQL 8.0.16+
+รับงานต่อจากระบบจองห้องพัก (พาร์ทเนอร์) หรือจากเจ้าของตึกโดยตรง → ประเมินหน้างาน → ทำสัญญา (รายวัน/รายเดือน + สัญญาเพิ่มเติม)
+→ เบิกวัสดุ → บันทึกงาน → ส่งมอบ พร้อมแจ้งสถานะกลับระบบพาร์ทเนอร์ด้วย webhook
+
+- Frontend: React 18 + TypeScript + Vite + Tailwind (ธีม Minimalist Brown เดิม)
+- Backend: Node.js (Express) microservices + MySQL 8 (database-per-service) บน Docker
+- เอกสารออกแบบระบบ / Partner API spec / แบ่งงาน dev 2 คน: [docs/system-design.md](docs/system-design.md)
 
 ## เริ่มต้นใช้งาน
 
+ต้องมี Docker Desktop
+
 ```bash
+cp .env.example .env   # ไม่บังคับ มีค่าเริ่มต้น
 npm install
-npm run dev        # http://localhost:5173
+npm run stack:up       # DB + phpMyAdmin + 3 services + gateway
+npm run dev            # http://localhost:5173
 ```
 
-หน้าใหม่:
-- `/spaces` — ค้นหาพื้นที่ใต้หอพัก (ชื่อหอ, จำนวนห้องพัก, ขนาด, ค่าเช่า)
-- `/tenant/store` — Store & Inventory Builder: ตั้งชื่อร้าน/โลโก้/เปิด-ปิด, หมวดหมู่, ราคาปลีก-ส่งขั้นบันได, ปรับสต็อก, Quick Preset
-- `/sandbox` — API Sandbox: จำลองแอปหอพักสั่งของผ่าน Open API (X-API-Key) แล้วเห็นสต็อกลดทันที + log request/response
+บัญชีเดโม (รหัสผ่าน `password123`, มีปุ่มลัดในหน้า login)
 
-ยังไม่มี backend จึงใช้ mock Web Service ในเบราว์เซอร์ (`src/services/mock/mockDb.ts`, กติกาเดียวกับ trigger ใน DB)
-ข้อมูลเก็บใน localStorage และ sync ข้ามแท็บ — ตั้ง `VITE_USE_MOCK=false` ใน `.env` เมื่อมี backend จริง
+| บัญชี | Role |
+| --- | --- |
+| admin@renocare.local | ADMIN |
+| owner@renocare.local | USER (เจ้าของหอ) |
+| partner@dormbook.local | USER (บัญชีตัวแทนระบบจอง DormBook) |
+| tech1@renocare.local, tech2@renocare.local | TECHNICIAN |
 
-หน้า `/login` เป็นโหมดทดลอง กดเลือกบทบาท (ผู้เช่า / เจ้าของพื้นที่ / แอดมิน) เพื่อดู Layout และเมนูของแต่ละ Role
+Partner API key เดโม: `dbk_live_demo_7f3a9c2e1b` — ลองได้ที่หน้า `/sandbox` (จำลองระบบจองห้องพักของเพื่อน รับ webhook จริง)
 
-## Backend + ฐานข้อมูล (Docker, Microservices)
-
-ต้องติดตั้ง Docker Desktop ก่อน ไม่ต้องลง MySQL หรือ Node backend ในเครื่อง
-
-```bash
-cp .env.example .env   # ปรับรหัสผ่าน/พอร์ตได้ที่นี่ (ไม่บังคับ มีค่าเริ่มต้น)
-npm run stack:up       # = docker compose up -d --build
-```
+## สถาปัตยกรรม
 
 ```
-frontend :5173 ──> gateway :3000 ──┬─> auth-service    :4001 ──> auth_db
-                                   ├─> space-service   :4002 ──> space_db
-                                   ├─> booking-service :4003 ──> booking_db
-                                   └─> store-service   :4004 ──> store_db
-                                         (MySQL 8.0 ตัวเดียว :3306, 1 database + 1 user ต่อ service)
+frontend :5173 ──┐
+partner (API key)┴─> gateway :3000 ──┬─> auth-service      :4001 ──> auth_db
+                                     ├─> job-service       :4002 ──> job_db  ──webhook──> partner
+                                     └─> inventory-service :4003 ──> inventory_db
 ```
 
-| Service | Path ที่ gateway ส่งต่อ | Database / ตาราง |
+| Service | Path ที่ gateway ส่งต่อ | ตาราง |
 | --- | --- | --- |
-| auth-service | `/api/auth` | `auth_db`: users, user_profiles |
-| space-service | `/api/spaces`, `/api/dormitories` | `space_db`: dormitories, spaces, space_images |
-| booking-service | `/api/booking(s)`, `/api/payments` | `booking_db`: bookings, payments, booking_status_logs |
-| store-service | `/api/tenant`, `/api/inventory`, `/api/product`, `/api/open` | `store_db`: stores, product_categories, products, product_price_tiers, inventory_*, api_keys, external_orders, external_order_items |
+| auth-service | `/api/auth`, `/api/users` | users, technician_profiles |
+| job-service | `/api/jobs`, `/api/buildings`, `/api/contracts`, `/api/invoices`, `/api/partners`, `/api/partner/v1` | partners, buildings, units, jobs, job_assignments, site_surveys, survey_items, contracts, contract_items, invoices, work_logs, job_status_logs, webhook_deliveries |
+| inventory-service | `/api/materials`, `/api/stock`, `/api/requisitions` | materials, stock_movements, requisitions, requisition_items |
 
-กติกา database-per-service
-- user ของแต่ละ service เข้าได้เฉพาะ database ของตัวเอง ห้าม JOIN ข้าม database: ต้องเรียก service อื่นผ่าน HTTP
-- ข้าม service เก็บแค่ id (เช่น `tenant_id`, `booking_id`) โดยไม่มี foreign key
-- endpoint `/internal/*` ใช้คุยกันระหว่าง service เท่านั้น gateway ไม่ส่งต่อ
-- สิ่งที่เปลี่ยนจาก schema เดิม (`database/legacy/`):
-  - `bookings` เพิ่ม snapshot `space_owner_id`, `dormitory_id` จาก space-service ตอนสร้าง booking
-  - `trg_store_before_insert` ย้ายไปเป็นโค้ดใน `POST /api/tenant/stores` (store-service ถาม booking-service)
-  - `v_admin_summary` แยกเป็น view ย่อยในแต่ละ DB แล้วรวมที่ gateway: `GET /api/admin/summary`
-  - trigger สต็อก/ออเดอร์/ราคาส่งอยู่ใน `store_db` ทั้งหมด จึงทำงานเหมือนเดิม
+- gateway ตรวจ JWT แล้วส่ง `X-User-Id / X-User-Role / X-User-Name` ให้ service; `/api/partner/v1/*` ใช้ `X-API-Key` แทน
+- ห้าม JOIN ข้าม database: ข้าม service เก็บ id + snapshot แล้วเรียกกันผ่าน `/internal/*` (gateway ไม่ส่งต่อ)
+- `/api/admin/summary` รวมตัวเลขจาก 3 service ที่ gateway
 
-เครื่องมือ
-- phpMyAdmin — http://localhost:8081 (`root` / `root` หรือ user ของ service เช่น `store_svc` / `store_pass`)
-- Health check — http://localhost:3000/health
-- ข้อมูลเก็บใน Docker volume `mysql_data` ไม่หายเมื่อ `stack:down`
-- SQL ใน `database/services/` รันอัตโนมัติเฉพาะตอนสร้าง DB ครั้งแรก ถ้าแก้ต้อง `npm run db:reset`
+## คำสั่ง
 
 | คำสั่ง | ทำอะไร |
 | --- | --- |
-| `npm run stack:up` | เปิดทั้งหมด (DB, phpMyAdmin, 4 services, gateway) |
-| `npm run stack:down` | ปิดทั้งหมด (ข้อมูลยังอยู่) |
-| `npm run stack:logs` | ดู log ทุก container |
-| `npm run db:up` | เปิดเฉพาะ MySQL + phpMyAdmin |
-| `npm run db:reset` | ลบข้อมูลทั้งหมดแล้วสร้างใหม่จาก SQL |
-| `npm run db:shell` | เข้า mysql CLI ด้วย root |
+| `npm run stack:up` | เปิดทั้งหมด |
+| `npm run stack:down` | ปิด (ข้อมูลยังอยู่) |
+| `npm run stack:logs` | ดู log |
+| `npm run db:reset` | ลบข้อมูลแล้วสร้างใหม่จาก SQL (ต้องทำทุกครั้งที่แก้ไฟล์ใน `database/services/`) |
+| `npm run db:shell` | mysql CLI (root) |
 
-ใช้ backend จริงจาก frontend: ตั้ง `VITE_USE_MOCK=false` ใน `.env` (ตอนนี้ service ยังเป็นโครง มี endpoint บางส่วน ดู `// TODO` ใน `services/*/src/index.js`)
+- phpMyAdmin — http://localhost:8081 · Health — http://localhost:3000/health
+- compose ใช้ชื่อ project `renocare` จึงได้ volume ใหม่ `renocare_mysql_data` (volume ของระบบเดิม `projectcsi400_mysql_data` ไม่ถูกแตะ ลบเองได้ด้วย `docker volume rm projectcsi400_mysql_data`)
+- พอร์ต 3306 ชนกับ MySQL ในเครื่อง → ตั้ง `DB_PORT=3307` ใน `.env`
 
-ถ้าพอร์ต 3306 ชนกับ MySQL ที่ลงไว้ในเครื่อง ให้หยุด service เดิม หรือตั้ง `DB_PORT=3307` ใน `.env`
+## โครงสร้าง frontend
 
-## โครงสร้าง
-
-- `tailwind.config.js` — Minimalist Brown: cream / beige (=sand) / mocha (=walnut) / espresso + semantic colors
-- `src/layouts` — Public / Auth / Dashboard (Sidebar เปลี่ยนตาม Role จาก `navigation/menus.ts`)
-- `src/routes` — React Router + lazy loading + `ProtectedRoute` + `RoleRoute`
-- `src/pages` — แยกโฟลเดอร์ตาม Role: `public`, `auth`, `admin`, `owner`, `tenant` (+ `tenant/inventory`)
-- `src/components` — `ui/` (design system), `common/`, `features/` (space, booking, inventory, dashboard, store, sandbox)
-- `src/services` — API calls แยกตาม domain (`storeService`, `dormApiService` = Open API client, `spaceService`) + `mock/`
-- `src/hooks` — React Query hooks (`useStore`, `useSpaces`) และ `useLiveSync` (refetch เมื่อข้อมูล mock เปลี่ยน)
-- `src/types` — TypeScript types ตรงกับ DB schema
-- `services/` — backend microservices (Express + mysql2): `gateway`, `auth-service`, `space-service`, `booking-service`, `store-service`
-- `database/services/` — schema แยกตาม service, `database/legacy/` — schema แบบรวม DB เดียวเดิม (อ้างอิงเท่านั้น)
-- `docs/` — ER explanation และ Component Tree
-
-ไฟล์ที่ทำเสร็จแล้ว: Layouts ทั้ง 3, Routes + Role guard, Button/Card/Input, StatusBadge, PageHeader, StatCard, Login (demo)
-ไฟล์อื่น ๆ เป็น stub (`// TODO`) พร้อมให้พัฒนาต่อ
+- `src/pages` — `public` (landing, partner sandbox), `auth`, `admin`, `user`, `technician`, และหน้าที่ใช้ร่วมกันหลาย role: `jobs`, `billing`, `inventory`
+- `src/components` — `ui/` (design system), `common/`, `features/job`, `features/inventory`
+- `src/services` — API client แยกตาม service (`authService`, `jobService`, `inventoryService`, `partnerService`)
+- `src/hooks` — React Query hooks แยกตาม service
+- `src/types` — ตรงกับ schema ใน `database/services/`
+- `src/constants/labels.ts` — ชื่อสถานะ/สีภาษาไทย และกติกาแนะนำรายวัน/รายเดือน

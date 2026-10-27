@@ -11,13 +11,7 @@
   "dependencies": {
     "bcryptjs": "2.4.3",
     "express": "5.1.0",
-<<<<<<< HEAD:services/auth-service/package.json
     "jsonwebtoken": "9.0.2",
     "mysql2": "3.11.5"
-=======
-    "mysql2": "3.11.5",
-    "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.2"
->>>>>>> 6aca8a91bcd6df99dcd651a81e703215097c3458:backend/services/auth-service/package.json
   }
 }

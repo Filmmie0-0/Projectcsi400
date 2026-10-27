@@ -1,10 +1,6 @@
-<<<<<<< HEAD:docker-compose.yml
 # ชื่อ project ใหม่ = volume ใหม่ (renocare_mysql_data) ไม่ชนกับ volume ของระบบเดิม
 name: renocare
 
-=======
-name: projectcsi400
->>>>>>> 6aca8a91bcd6df99dcd651a81e703215097c3458:backend/docker-compose.yml
 x-service-db: &service-db
   DB_HOST: db
   DB_PORT: 3306
@@ -65,12 +61,9 @@ services:
       DB_NAME: auth_db
       DB_USER: auth_svc
       DB_PASSWORD: ${AUTH_DB_PASSWORD:-auth_pass}
-<<<<<<< HEAD:docker-compose.yml
-      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
-=======
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-}
+      # อย่างน้อย 32 ไบต์ ตั้งใน backend/.env (คัดลอกจาก .env.example)
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?ตั้ง AUTH_JWT_SECRET ใน backend/.env ก่อน (cp .env.example .env)}
       NODE_ENV: ${NODE_ENV:-development}
->>>>>>> 6aca8a91bcd6df99dcd651a81e703215097c3458:backend/docker-compose.yml
 
   job-service:
     build: ./services/job-service
@@ -115,7 +108,6 @@ services:
       AUTH_SERVICE_URL: http://auth-service:4001
       JOB_SERVICE_URL: http://job-service:4002
       INVENTORY_SERVICE_URL: http://inventory-service:4003
-      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
     ports:
       - "${GATEWAY_PORT:-3000}:3000"

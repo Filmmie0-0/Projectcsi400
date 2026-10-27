@@ -1,5 +1,5 @@
 {
-  "name": "mfc-wms-backend",
+  "name": "renocare-backend",
   "private": true,
   "scripts": {
     "stack:up": "docker compose up -d --build",

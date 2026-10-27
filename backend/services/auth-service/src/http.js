@@ -22,5 +22,5 @@ export function errorHandler(err, _req, res, _next) {
   if (err instanceof HttpError) return res.status(err.status).json({ code: err.code, message: err.message });
   if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ code: 'DUPLICATE', message: 'ข้อมูลซ้ำกับที่มีอยู่แล้ว' });
   console.error(err);
-  res.status(500).json({ code: 'INTERNAL', message: err.message });
+  res.status(500).json({ code: 'INTERNAL', message: 'เกิดข้อผิดพลาดในระบบ กรุณาลองใหม่อีกครั้ง' });
 }

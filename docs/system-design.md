@@ -63,7 +63,7 @@ NEW ──แอดมินมอบหมายช่าง+นัด──▶
 
 ```
 Frontend (React) ─┐
-DormBook (API key)┴─▶ Gateway :3000  ── ตรวจ JWT, ส่ง X-User-* ให้ service, รวม /api/admin/summary
+DormBook (API key)┴─▶ Gateway :3000  ── ตรวจ session ผ่าน auth-service ทุก request, ส่ง X-User-* ให้ service, รวม /api/admin/summary
                          ├─▶ auth-service      :4001 ─▶ auth_db       users, technician_profiles
                          ├─▶ job-service       :4002 ─▶ job_db        partners, buildings, units, jobs, surveys,
                          │        │   ▲                               contracts, invoices, work_logs, webhooks
@@ -76,6 +76,14 @@ job-service ──webhook (HMAC-SHA256)──▶ DormBook
 ทำไมเหลือ 3 service (เดิม 4): แบ่งตามสิ่งที่ dev 2 คนรับผิดชอบได้จริง และแต่ละ service มีข้อมูลของตัวเองชัดเจน
 - ข้าม database เก็บแค่ id + snapshot (เช่น `technician_name`, `job_code`) ไม่มี FK ข้าม DB
 - `/internal/*` เรียกได้เฉพาะในเครือข่าย Docker (gateway ไม่ส่งต่อ)
+
+### ความปลอดภัยของการเข้าสู่ระบบ
+- JWT (HS256, 8 ชม., มี issuer/audience) เก็บใน **HttpOnly + SameSite=Strict cookie** — JavaScript อ่าน token ไม่ได้ (กัน XSS ขโมย token), production เปิด `Secure`
+- `users.token_version`: logout หรือแอดมินระงับบัญชี → เพิ่มเลข → token เก่าใช้ไม่ได้ทันที
+- gateway ถาม auth-service (`/internal/auth/verify`) ทุก request: ลายเซ็น + บัญชียัง ACTIVE + role/token_version ตรง แล้วจึงส่ง `X-User-*` (header ที่ client ปลอมมาถูกลบทิ้ง)
+- กัน CSRF: request ที่ไม่ใช่ GET จากเบราว์เซอร์ต้องมี Origin ตรงกับ `CORS_ORIGIN`
+- Rate limit: login 10 ครั้ง/15 นาที, สมัคร 5 ครั้ง/ชม. ต่อ IP
+- รหัสผ่าน bcrypt (cost 12), ยาว 8-72 ไบต์; `AUTH_JWT_SECRET` ต้องยาว ≥ 32 ไบต์ ไม่งั้น auth-service ปฏิเสธ
 
 ### จุดเด่นฝั่งฐานข้อมูล (ใช้อธิบายอาจารย์)
 | กลไก | ที่ไหน | ทำอะไร |
@@ -156,12 +164,12 @@ Header `X-Signature: sha256=<HMAC-SHA256(webhook_secret, raw body)>` และ `
 
 | | Dev A — งาน & พาร์ทเนอร์ | Dev B — ผู้ใช้ & คลัง |
 | --- | --- | --- |
-| Backend | `job-service` (jobs, surveys, contracts, invoices, partner API, webhook), `gateway` | `auth-service`, `inventory-service` |
-| Database | `02_job_db.sql` | `01_auth_db.sql`, `03_inventory_db.sql` |
-| Frontend | `pages/jobs`, `pages/billing`, `pages/user`, `pages/public/PartnerSandboxPage`, `pages/admin/PartnersPage`, `components/features/job` | `pages/auth`, `pages/admin/UsersPage`, `pages/inventory`, `pages/technician`, `components/features/inventory`, `components/ui` |
+| Backend (`backend/services/`) | `job-service` (jobs, surveys, contracts, invoices, partner API, webhook), `gateway` | `auth-service`, `inventory-service` |
+| Database (`backend/database/services/`) | `02_job_db.sql` | `01_auth_db.sql`, `03_inventory_db.sql` |
+| Frontend (`frontend/src/`) | `pages/jobs`, `pages/billing`, `pages/user`, `pages/public/PartnerSandboxPage`, `pages/admin/PartnersPage`, `components/features/job` | `pages/auth`, `pages/admin/UsersPage`, `pages/inventory`, `pages/technician`, `components/features/inventory`, `components/ui` |
 | ประสานงานกับเพื่อน | Partner API + webhook spec (หัวข้อ 5) | — |
 
-ไฟล์ที่ต้องตกลงกันก่อนแก้: `src/types/*`, `src/constants/labels.ts`, `docs/system-design.md`
+ไฟล์ที่ต้องตกลงกันก่อนแก้: `frontend/src/types/*`, `frontend/src/constants/labels.ts`, `docs/system-design.md`
 
 ### แผน 4 สัปดาห์ (ตัวอย่าง)
 1. ตกลง schema + API spec กับเพื่อน, ยืนยัน flow กับอาจารย์

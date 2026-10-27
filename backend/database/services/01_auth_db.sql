@@ -8,16 +8,12 @@ CREATE TABLE users (
   user_id        BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   email          VARCHAR(255) NOT NULL,
   password_hash  VARCHAR(255) NOT NULL,
-<<<<<<< HEAD:database/services/01_auth_db.sql
   role           ENUM('ADMIN','USER','TECHNICIAN') NOT NULL,
   status         ENUM('ACTIVE','SUSPENDED') NOT NULL DEFAULT 'ACTIVE',
+  -- เพิ่มทุกครั้งที่ logout / ถูกระงับ → token เก่าใช้ไม่ได้ทันที (gateway ตรวจผ่าน /internal/auth/verify)
+  token_version  INT UNSIGNED NOT NULL DEFAULT 0,
   full_name      VARCHAR(150) NOT NULL,
   phone          VARCHAR(20) NULL,
-=======
-  role           ENUM('ADMIN','OWNER','TENANT') NOT NULL,
-  status         ENUM('ACTIVE','SUSPENDED','PENDING_VERIFY') NOT NULL DEFAULT 'PENDING_VERIFY',
-  token_version  INT UNSIGNED NOT NULL DEFAULT 0,
->>>>>>> 6aca8a91bcd6df99dcd651a81e703215097c3458:backend/database/services/01_auth_db.sql
   last_login_at  TIMESTAMP NULL,
   created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

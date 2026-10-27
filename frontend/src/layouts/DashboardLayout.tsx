@@ -3,26 +3,25 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { Hammer, Menu, X, LogOut } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { authService } from '../services/authService';
-import { toApiError } from '../services/apiError';
 import { MENUS, ROLE_LABEL } from './navigation/menus';
 
 export default function DashboardLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
-  const [logoutError, setLogoutError] = useState('');
 
   if (!user) return null;
   const menu = MENUS[user.role];
 
+  // server เพิกถอน token (token_version) + ลบ cookie; ฝั่งเบราว์เซอร์ล้างสถานะเสมอแม้เรียกไม่สำเร็จ
   const handleLogout = async () => {
-    setLogoutError('');
     try {
       await authService.logout();
+    } catch {
+      /* cookie หมดอายุเองภายใน 8 ชม. */
+    } finally {
       logout();
       navigate('/login', { replace: true });
-    } catch (err) {
-      setLogoutError(toApiError(err).message);
     }
   };
 
@@ -113,7 +112,6 @@ export default function DashboardLayout() {
           </div>
 
           <div className="flex items-center gap-2">
-<<<<<<< HEAD:src/layouts/DashboardLayout.tsx
             <span className="rounded-full bg-walnut-50 px-3 py-1 text-xs font-medium text-walnut-700">{ROLE_LABEL[user.role]}</span>
             <Link
               to="/sandbox"
@@ -121,16 +119,6 @@ export default function DashboardLayout() {
             >
               Partner Sandbox
             </Link>
-=======
-            {logoutError && <p className="text-sm text-danger" role="alert">{logoutError}</p>}
-            <button className="relative rounded-full p-2 text-espresso-700 hover:bg-cream-200">
-              <Bell className="h-5 w-5" />
-              <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-danger ring-2 ring-cream-50" />
-            </button>
-            <button className="rounded-lg bg-sand-200 px-4 py-2 text-sm font-medium text-espresso-900 transition-colors hover:bg-sand-300">
-              ช่วยเหลือ
-            </button>
->>>>>>> 6aca8a91bcd6df99dcd651a81e703215097c3458:frontend/src/layouts/DashboardLayout.tsx
           </div>
         </header>
 

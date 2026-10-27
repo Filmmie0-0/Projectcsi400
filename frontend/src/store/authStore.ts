@@ -9,6 +9,7 @@ interface AuthState {
   logout: () => void;
 }
 
+// token อยู่ใน HttpOnly cookie (JS อ่านไม่ได้) — ที่นี่เก็บแค่ข้อมูลผู้ใช้และเวลาหมดอายุไว้แสดงผล
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
@@ -18,7 +19,7 @@ export const useAuthStore = create<AuthState>()(
       logout: () => set({ user: null, expiresAt: null }),
     }),
     {
-      name: 'mfc-auth',
+      name: 'renocare-auth',
       storage: createJSONStorage(() => localStorage),
       partialize: ({ user, expiresAt }) => ({ user, expiresAt }),
     },

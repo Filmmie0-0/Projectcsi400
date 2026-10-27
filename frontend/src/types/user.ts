@@ -13,9 +13,10 @@ export interface User {
   createdAt?: string;
 }
 
+// token อยู่ใน HttpOnly cookie ไม่ได้ส่งมาใน body
 export interface AuthResponse {
-  token: string;
   user: User;
+  expiresIn: number;
 }
 
 export interface UserInput {

@@ -2,8 +2,9 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import { pool, tx, nextCode } from '../db.js';
 import { HttpError, camel, requireRole } from '../http.js';
-import { assertStatus, loadJob } from '../jobs.js';
-import { cancelJob } from './jobs.js';
+import { COMPANY_CONTACT, assertStatus, loadJob, recordOwnerDecision, technicianContacts } from '../jobs.js';
+import { fetchOwnerContact } from '../partnerClient.js';
+import { WORK_SCOPES, cancelJob } from './jobs.js';
 
 export const router = Router();
 
@@ -13,7 +14,8 @@ const newApiKey = () => `pk_live_${crypto.randomBytes(16).toString('hex')}`;
 // ───────────── Admin: จัดการพาร์ทเนอร์ (/api/partners) ─────────────
 router.get('/api/partners', requireRole('ADMIN'), async (_req, res) => {
   const [rows] = await pool.query(
-    `SELECT p.partner_id, p.name, p.owner_user_id, p.api_key_prefix, p.webhook_url, p.is_active, p.created_at,
+    `SELECT p.partner_id, p.name, p.owner_user_id, p.api_key_prefix, p.webhook_url, p.api_base_url, p.is_active, p.created_at,
+            p.outbound_api_key IS NOT NULL AS has_outbound_key,
             (SELECT COUNT(*) FROM jobs j WHERE j.partner_id = p.partner_id) AS total_jobs,
             (SELECT COUNT(*) FROM webhook_deliveries w WHERE w.partner_id = p.partner_id AND w.status = 'FAILED') AS failed_webhooks
      FROM partners p ORDER BY p.name`,
@@ -23,22 +25,26 @@ router.get('/api/partners', requireRole('ADMIN'), async (_req, res) => {
 
 // คีย์และ secret แสดงครั้งเดียวตอนสร้าง (DB เก็บแค่ hash ของคีย์)
 router.post('/api/partners', requireRole('ADMIN'), async (req, res) => {
-  const { name, ownerUserId, webhookUrl } = req.body;
+  const { name, ownerUserId, webhookUrl, apiBaseUrl, outboundApiKey } = req.body;
   if (!name?.trim() || !ownerUserId) throw new HttpError(422, 'VALIDATION', 'กรอกชื่อพาร์ทเนอร์และบัญชีผู้ใช้ตัวแทน');
   const apiKey = newApiKey();
   const webhookSecret = `whsec_${crypto.randomBytes(16).toString('hex')}`;
   const [r] = await pool.query(
-    `INSERT INTO partners (name, owner_user_id, api_key_prefix, api_key_hash, webhook_url, webhook_secret) VALUES (?, ?, ?, ?, ?, ?)`,
-    [name.trim(), ownerUserId, apiKey.slice(0, 12), sha256(apiKey), webhookUrl || null, webhookSecret],
+    `INSERT INTO partners (name, owner_user_id, api_key_prefix, api_key_hash, webhook_url, webhook_secret, api_base_url, outbound_api_key)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [name.trim(), ownerUserId, apiKey.slice(0, 12), sha256(apiKey), webhookUrl || null, webhookSecret,
+     apiBaseUrl || null, outboundApiKey || null],
   );
   res.status(201).json({ partnerId: r.insertId, apiKey, webhookSecret });
 });
 
 router.patch('/api/partners/:id', requireRole('ADMIN'), async (req, res) => {
-  const { webhookUrl, isActive } = req.body;
-  await pool.query('UPDATE partners SET webhook_url = COALESCE(?, webhook_url), is_active = COALESCE(?, is_active) WHERE partner_id = ?', [
-    webhookUrl ?? null, isActive === undefined ? null : Number(Boolean(isActive)), req.params.id,
-  ]);
+  const { webhookUrl, isActive, apiBaseUrl, outboundApiKey } = req.body;
+  await pool.query(
+    `UPDATE partners SET webhook_url = COALESCE(?, webhook_url), is_active = COALESCE(?, is_active),
+            api_base_url = COALESCE(?, api_base_url), outbound_api_key = COALESCE(?, outbound_api_key) WHERE partner_id = ?`,
+    [webhookUrl ?? null, isActive === undefined ? null : Number(Boolean(isActive)), apiBaseUrl ?? null, outboundApiKey ?? null, req.params.id],
+  );
   res.json({ ok: true });
 });
 
@@ -86,12 +92,20 @@ partnerApi.use(async (req, _res, next) => {
 
 // ส่งงานเข้า: upsert ตึก/ห้องตาม externalRef แล้วสร้างงาน
 // externalRef ของงานซ้ำ = คืนงานเดิม (idempotent, ส่งซ้ำได้เมื่อ network มีปัญหา)
+// workScope: INTERIOR (ค่าเริ่มต้น) = เริ่มได้เลย, STRUCTURAL = ต้องได้ข้อมูลเจ้าของหอ + เจ้าของหออนุมัติก่อน
+//   ถ้าไม่ส่ง owner มาด้วย เราจะไปขอจาก GET {api_base_url}/buildings/{ref}/owner ของพาร์ทเนอร์เอง
 partnerApi.post('/jobs', async (req, res) => {
   const p = req.partner;
-  const { externalRef, jobType, building, unit, title, description, priority = 'NORMAL', preferredDate, contact = {} } = req.body;
+  const {
+    externalRef, jobType, building, unit, title, description, priority = 'NORMAL', preferredDate, contact = {},
+    workScope = 'INTERIOR', owner,
+  } = req.body;
   if (!externalRef || !['INSPECTION', 'RENOVATION'].includes(jobType) || !title || !building?.externalRef || !unit?.code) {
     throw new HttpError(422, 'VALIDATION', 'ต้องมี externalRef, jobType, title, building.externalRef และ unit.code');
   }
+  if (!WORK_SCOPES.includes(workScope)) throw new HttpError(422, 'VALIDATION', 'workScope ต้องเป็น INTERIOR หรือ STRUCTURAL');
+  const structural = workScope === 'STRUCTURAL';
+  const ownerInPayload = Boolean(structural && owner?.name && owner?.phone);
 
   const [[existing]] = await pool.query('SELECT * FROM jobs WHERE partner_id = ? AND external_ref = ?', [p.partner_id, externalRef]);
   if (existing) return res.status(200).json(partnerJobView(existing));
@@ -111,16 +125,27 @@ partnerApi.post('/jobs', async (req, res) => {
     const [[u]] = await conn.query('SELECT unit_id FROM units WHERE building_id = ? AND code = ?', [b.building_id, unit.code]);
 
     const code = await nextCode(conn, 'jobs', 'job_code', 'JB');
-    await conn.query('SET @status_remark = ?', [`รับงานจาก ${p.name}`]);
+    await conn.query('SET @status_remark = ?', [`รับงานจาก ${p.name}${structural ? ' (งานโครงสร้าง รอเจ้าของหออนุมัติ)' : ''}`]);
     const [r] = await conn.query(
       `INSERT INTO jobs (job_code, job_type, source, partner_id, external_ref, unit_id, requester_id, title, description,
-                         priority, preferred_date, contact_name, contact_phone)
-       VALUES (?, ?, 'PARTNER', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                         priority, preferred_date, contact_name, contact_phone, work_scope, owner_approval)
+       VALUES (?, ?, 'PARTNER', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [code, jobType, p.partner_id, externalRef, u.unit_id, p.owner_user_id, title, description ?? null,
-       priority, preferredDate || null, contact.name ?? null, contact.phone ?? null],
+       priority, preferredDate || null, contact.name ?? null, contact.phone ?? null,
+       workScope, structural ? 'PENDING' : 'NOT_REQUIRED'],
     );
+    if (structural) {
+      await conn.query(
+        'INSERT INTO owner_contacts (job_id, owner_name, owner_phone, owner_email, source, fetched_at) VALUES (?, ?, ?, ?, ?, ?)',
+        ownerInPayload
+          ? [r.insertId, String(owner.name).slice(0, 150), String(owner.phone).slice(0, 20), owner.email ?? null, 'PAYLOAD', new Date()]
+          : [r.insertId, null, null, null, null, null],
+      );
+    }
     return r.insertId;
   });
+  // เรียก API พาร์ทเนอร์หลัง commit (ไม่ถือ transaction ค้างระหว่างรอ network)
+  if (structural && !ownerInPayload) await fetchOwnerContact(jobId);
   const [[job]] = await pool.query('SELECT * FROM jobs WHERE job_id = ?', [jobId]);
   res.status(201).json(partnerJobView(job));
 });
@@ -138,6 +163,8 @@ partnerApi.get('/jobs/:externalRef', async (req, res) => {
   const [[progress]] = await pool.query('SELECT MAX(progress_pct) AS pct FROM work_logs WHERE job_id = ?', [job.job_id]);
   res.json({
     ...partnerJobView(job),
+    technicians: await technicianContacts(pool, job.job_id),
+    contact: COMPANY_CONTACT,
     latestSurvey: survey ? camel(survey) : null,
     contracts: contracts.map(camel),
     progressPct: progress.pct ?? 0,
@@ -150,6 +177,19 @@ partnerApi.post('/jobs/:externalRef/cancel', async (req, res) => {
     const job = await loadJob(conn, found.job_id, { lock: true });
     assertStatus(job, 'NEW', 'SURVEY_ASSIGNED', 'SURVEYED', 'QUOTED');
     await cancelJob(conn, job, req.body.reason || `ยกเลิกโดย ${req.partner.name}`);
+  });
+  const [[job]] = await pool.query('SELECT * FROM jobs WHERE job_id = ?', [found.job_id]);
+  res.json(partnerJobView(job));
+});
+
+// ระบบจองห้องพักถามเจ้าของหอในระบบตัวเองแล้วส่งผลมา (ทางเลือกแทนให้แอดมินเราโทรถาม)
+partnerApi.post('/jobs/:externalRef/owner-approval', async (req, res) => {
+  const found = await findPartnerJob(req);
+  const { decision, note } = req.body;
+  await tx(null, async (conn) => {
+    const job = await loadJob(conn, found.job_id, { lock: true });
+    await recordOwnerDecision(conn, job, decision, note);
+    if (decision === 'REJECTED') await cancelJob(conn, job, `เจ้าของหอไม่อนุมัติ${note ? `: ${note}` : ''}`);
   });
   const [[job]] = await pool.query('SELECT * FROM jobs WHERE job_id = ?', [found.job_id]);
   res.json(partnerJobView(job));
@@ -169,5 +209,5 @@ async function findPartnerJob(req) {
 
 const partnerJobView = (j) => ({
   jobCode: j.job_code, externalRef: j.external_ref, jobType: j.job_type, title: j.title,
-  status: j.status, createdAt: j.created_at, completedAt: j.completed_at,
+  workScope: j.work_scope, ownerApproval: j.owner_approval, status: j.status, createdAt: j.created_at, completedAt: j.completed_at,
 });

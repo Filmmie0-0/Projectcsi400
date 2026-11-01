@@ -79,6 +79,9 @@ services:
       DB_USER: job_svc
       DB_PASSWORD: ${JOB_DB_PASSWORD:-job_pass}
       AUTH_SERVICE_URL: http://auth-service:4001
+      # ผู้ประสานงานฝั่งเราที่ส่งให้ระบบจองห้องพักพร้อมข้อมูลช่าง
+      COMPANY_CONTACT_NAME: ${COMPANY_CONTACT_NAME:-ฝ่ายประสานงาน RenoCare}
+      COMPANY_CONTACT_PHONE: ${COMPANY_CONTACT_PHONE:-020000000}
 
   inventory-service:
     build: ./services/inventory-service

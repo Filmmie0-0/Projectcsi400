@@ -8,6 +8,8 @@ USE job_db;
 -- ───────────────────────── Partner (ระบบจองห้องพักของเพื่อน) ─────────────────────────
 -- owner_user_id = บัญชี USER ที่เป็นตัวแทนพาร์ทเนอร์ (ใช้เซ็นสัญญา/จ่ายเงินแทนงานที่ส่งมาทาง API)
 -- api_key เก็บแค่ SHA-256 แสดงคีย์เต็มครั้งเดียวตอนสร้าง
+-- api_base_url / outbound_api_key = ฝั่งที่ "เรา" เรียก API ของพาร์ทเนอร์ (server คุยกับ server) เช่น ขอข้อมูลติดต่อเจ้าของหอ
+--   outbound_api_key ต้องเก็บแบบอ่านได้เพราะเราต้องส่งออกไปเอง (คนละคีย์กับ api_key ที่พาร์ทเนอร์ใช้เรียกเรา)
 CREATE TABLE partners (
   partner_id      BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   name            VARCHAR(150) NOT NULL,
@@ -16,6 +18,8 @@ CREATE TABLE partners (
   api_key_hash    CHAR(64) NOT NULL,
   webhook_url     VARCHAR(500) NULL,
   webhook_secret  VARCHAR(64) NOT NULL,
+  api_base_url    VARCHAR(500) NULL,
+  outbound_api_key VARCHAR(100) NULL,
   is_active       TINYINT(1) NOT NULL DEFAULT 1,
   created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (partner_id),
@@ -56,6 +60,9 @@ CREATE TABLE units (
 -- ───────────────────────── งาน (Work order) ─────────────────────────
 -- NEW → SURVEY_ASSIGNED → SURVEYED → QUOTED → CONTRACTED → IN_PROGRESS → COMPLETED  (+ CANCELLED)
 -- งาน INSPECTION ที่ตรวจแล้วไม่ต้องซ่อม: SURVEYED → COMPLETED ได้เลย
+-- work_scope: INTERIOR   = งานภายในห้อง/ซ่อมทั่วไป ไม่ต้องขออนุญาตเจ้าของหอ (owner_approval = NOT_REQUIRED)
+--             STRUCTURAL = เปลี่ยนแปลงตัวอาคาร / ทำเป็นพื้นที่พาณิชย์ (เช่น ร้านโชว์ห่วย) ต้องให้เจ้าของหออนุมัติก่อน
+--             ส่งสัญญาและเริ่มงานได้ (PENDING → APPROVED; REJECTED = ยกเลิกงาน)
 CREATE TABLE jobs (
   job_id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   job_code        VARCHAR(20) NOT NULL,
@@ -71,6 +78,8 @@ CREATE TABLE jobs (
   preferred_date  DATE NULL,
   contact_name    VARCHAR(150) NULL,
   contact_phone   VARCHAR(20) NULL,
+  work_scope      ENUM('INTERIOR','STRUCTURAL') NOT NULL DEFAULT 'INTERIOR',
+  owner_approval  ENUM('NOT_REQUIRED','PENDING','APPROVED','REJECTED') NOT NULL DEFAULT 'NOT_REQUIRED',
   status          ENUM('NEW','SURVEY_ASSIGNED','SURVEYED','QUOTED','CONTRACTED','IN_PROGRESS','COMPLETED','CANCELLED')
                   NOT NULL DEFAULT 'NEW',
   completed_at    TIMESTAMP NULL,
@@ -83,14 +92,32 @@ CREATE TABLE jobs (
   KEY idx_job_status (status),
   CONSTRAINT fk_job_unit    FOREIGN KEY (unit_id)    REFERENCES units(unit_id),
   CONSTRAINT fk_job_partner FOREIGN KEY (partner_id) REFERENCES partners(partner_id),
-  CONSTRAINT chk_job_source CHECK ((source = 'PARTNER') = (partner_id IS NOT NULL))
+  CONSTRAINT chk_job_source CHECK ((source = 'PARTNER') = (partner_id IS NOT NULL)),
+  CONSTRAINT chk_job_approval CHECK ((work_scope = 'INTERIOR') = (owner_approval = 'NOT_REQUIRED'))
 ) ENGINE=InnoDB;
 
--- technician_name = snapshot จาก auth-service ตอนมอบหมาย
+-- ข้อมูลติดต่อเจ้าของหอ (เฉพาะงาน STRUCTURAL) — สำเนาเก็บใน job_db ของเรา ไม่แตะ database ของระบบจองห้อง
+-- source: PAYLOAD = ส่งมากับงาน, PARTNER_API = เราไปขอจาก API ของพาร์ทเนอร์, MANUAL = แอดมินกรอกเอง
+CREATE TABLE owner_contacts (
+  job_id        BIGINT UNSIGNED NOT NULL,
+  owner_name    VARCHAR(150) NULL,
+  owner_phone   VARCHAR(20) NULL,
+  owner_email   VARCHAR(150) NULL,
+  source        ENUM('PAYLOAD','PARTNER_API','MANUAL') NULL,
+  fetch_error   VARCHAR(500) NULL,
+  fetched_at    TIMESTAMP NULL,
+  decided_at    TIMESTAMP NULL,
+  decision_note VARCHAR(500) NULL,
+  PRIMARY KEY (job_id),
+  CONSTRAINT fk_owner_job FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- technician_name/phone = snapshot จาก auth-service ตอนมอบหมาย (phone ส่งให้พาร์ทเนอร์ใช้ติดต่อช่าง)
 CREATE TABLE job_assignments (
   job_id           BIGINT UNSIGNED NOT NULL,
   technician_id    BIGINT UNSIGNED NOT NULL,
   technician_name  VARCHAR(150) NOT NULL,
+  technician_phone VARCHAR(20) NULL,
   is_lead          TINYINT(1) NOT NULL DEFAULT 0,
   assigned_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (job_id, technician_id),
@@ -335,10 +362,13 @@ FROM jobs;
 
 -- ───────────────────────── Seed ─────────────────────────
 -- API key เดโม: dbk_live_demo_7f3a9c2e1b  (webhook ชี้ไปที่ระบบจองจำลองใน gateway)
-INSERT INTO partners (partner_id, name, owner_user_id, api_key_prefix, api_key_hash, webhook_url, webhook_secret) VALUES
+-- api_base_url ชี้ไป API จำลองของระบบจองใน gateway (ขอข้อมูลเจ้าของหอ) คีย์ขาออกเดโม: rnc_out_demo_4b8d2f
+INSERT INTO partners (partner_id, name, owner_user_id, api_key_prefix, api_key_hash, webhook_url, webhook_secret,
+                      api_base_url, outbound_api_key) VALUES
   (1, 'DormBook — ระบบจองห้องพัก', 3, 'dbk_live_dem',
    '3987047cba8caf17c107d864602a93d5b3d24a530faf5bce2a9a769c43051353',
-   'http://gateway:3000/mock-partner/webhook', 'whsec_dormbook_demo');
+   'http://gateway:3000/mock-partner/webhook', 'whsec_dormbook_demo',
+   'http://gateway:3000/mock-partner/api', 'rnc_out_demo_4b8d2f');
 
 INSERT INTO buildings (building_id, owner_user_id, partner_id, external_ref, name, address) VALUES
   (1, 2, NULL, NULL,         'หอพักสุขใจ แมนชั่น',      'ซ.พหลโยธิน 32 แขวงจันทรเกษม เขตจตุจักร กรุงเทพฯ'),
@@ -366,11 +396,24 @@ INSERT INTO jobs (job_id, job_code, job_type, source, partner_id, external_ref, 
    'ทาสีใหม่ + เปลี่ยนพื้นห้อง 305', 'ห้องเก่า ผนังมีคราบ พื้นลามิเนตบวม', 'LOW', '2026-11-02',
    'สมหญิง', '0811111111', 'SURVEY_ASSIGNED', '2026-10-25 11:00:00');
 
+-- งานโครงสร้างจาก DormBook: ปรับพื้นที่ใต้ตึกเป็นร้านโชว์ห่วย รอเจ้าของหออนุมัติ
+INSERT INTO jobs (job_id, job_code, job_type, source, partner_id, external_ref, unit_id, requester_id, title, description,
+                  priority, preferred_date, contact_name, contact_phone, work_scope, owner_approval, status, created_at) VALUES
+  (5, 'JB2610-0005', 'RENOVATION', 'PARTNER', 1, 'DB-REQ-5521', 5, 3,
+   'ปรับพื้นที่ล็อบบี้ใต้ตึกเป็นร้านโชว์ห่วย', 'ทุบผนังกั้นบางส่วน ทำหน้าร้านกระจก เดินไฟ 3 เฟสสำหรับตู้แช่', 'NORMAL', '2026-11-10',
+   'คุณนิด (DormBook)', '0822222222', 'STRUCTURAL', 'PENDING', 'NEW', '2026-10-30 13:00:00');
+
+INSERT INTO owner_contacts (job_id, owner_name, owner_phone, owner_email, source, fetched_at) VALUES
+  (5, 'คุณประเสริฐ ริมคลอง', '0899999999', 'owner@riverside.local', 'PARTNER_API', '2026-10-30 13:00:05');
+
 INSERT INTO job_assignments (job_id, technician_id, technician_name, is_lead, assigned_at) VALUES
   (1, 4, 'ช่างเอก งานโครงสร้าง', 1, '2026-09-21 09:00:00'),
   (1, 5, 'ช่างบี ไฟฟ้า-ประปา',   0, '2026-09-21 09:00:00'),
   (2, 5, 'ช่างบี ไฟฟ้า-ประปา',   1, '2026-10-20 10:00:00'),
   (4, 4, 'ช่างเอก งานโครงสร้าง', 1, '2026-10-26 09:00:00');
+
+UPDATE job_assignments a JOIN (SELECT 4 AS id, '0833333333' AS phone UNION ALL SELECT 5, '0844444444') t
+    ON t.id = a.technician_id SET a.technician_phone = t.phone;
 
 INSERT INTO site_surveys (survey_id, job_id, survey_type, technician_id, scheduled_date, status, summary, est_days, need_repair, submitted_at) VALUES
   (1, 1, 'INITIAL', 4, '2026-09-23', 'SUBMITTED', 'พื้นที่โล่ง 40 ตร.ม. พื้นปูนเดิมแตกร้าว ระบบไฟเดิมไม่รองรับเครื่องชงกาแฟ', 45, 1, '2026-09-23 16:00:00'),
@@ -431,4 +474,5 @@ INSERT INTO job_status_logs (job_id, from_status, to_status, changed_by, remark,
   (2, 'SURVEYED',        'QUOTED',          1,    'ส่งสัญญา CT2610-0002', '2026-10-22 09:30:00'),
   (3, NULL,              'NEW',             NULL, 'รับงานจาก DormBook',    '2026-10-26 14:30:00'),
   (4, NULL,              'NEW',             2,    NULL,                    '2026-10-25 11:00:00'),
-  (4, 'NEW',             'SURVEY_ASSIGNED', 1,    'นัดสำรวจ 28 ต.ค.',     '2026-10-26 09:00:00');
+  (4, 'NEW',             'SURVEY_ASSIGNED', 1,    'นัดสำรวจ 28 ต.ค.',     '2026-10-26 09:00:00'),
+  (5, NULL,              'NEW',             NULL, 'รับงานจาก DormBook (งานโครงสร้าง รอเจ้าของหออนุมัติ)', '2026-10-30 13:00:00');

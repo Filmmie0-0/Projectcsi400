@@ -1,10 +1,15 @@
 import { Router } from 'express';
 import { pool, tx, nextCode } from '../db.js';
 import { HttpError, camel, currentUser, requireRole } from '../http.js';
-import { assertCanView, assertStatus, assignment, enqueueWebhook, getJobDetail, loadJob, moveStatus } from '../jobs.js';
+import {
+  COMPANY_CONTACT, assertCanView, assertOwnerApproved, assertStatus, assignment, enqueueWebhook, getJobDetail, loadJob, moveStatus,
+  recordOwnerDecision, technicianContacts,
+} from '../jobs.js';
+import { fetchOwnerContact } from '../partnerClient.js';
 
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL ?? 'http://localhost:4001';
 const JOB_TYPES = ['INSPECTION', 'RENOVATION'];
+export const WORK_SCOPES = ['INTERIOR', 'STRUCTURAL'];
 const UNIT_TYPES = ['ROOM', 'COMMON', 'UNDER_BUILDING'];
 const CONDITIONS = ['GOOD', 'FAIR', 'DAMAGED', 'MISSING'];
 const ACTIONS = ['NONE', 'REPAIR', 'REPLACE'];
@@ -69,6 +74,7 @@ router.get('/api/jobs', async (req, res) => {
   if (req.query.type) { where.push('j.job_type = ?'); params.push(req.query.type); }
   const [rows] = await pool.query(
     `SELECT j.job_id, j.job_code, j.job_type, j.source, j.title, j.priority, j.status, j.preferred_date, j.created_at,
+            j.work_scope, j.owner_approval,
             u.code AS unit_code, u.unit_type, b.name AS building_name, p.name AS partner_name,
             (SELECT technician_name FROM job_assignments a WHERE a.job_id = j.job_id AND a.is_lead = 1 LIMIT 1) AS lead_technician,
             (SELECT scheduled_date FROM site_surveys s WHERE s.job_id = j.job_id AND s.status = 'SCHEDULED' LIMIT 1) AS survey_date,
@@ -84,8 +90,10 @@ router.get('/api/jobs', async (req, res) => {
 
 router.post('/api/jobs', requireRole('USER'), async (req, res) => {
   const user = currentUser(req);
-  const { unitId, jobType, title, description, priority = 'NORMAL', preferredDate, contactName, contactPhone } = req.body;
-  if (!JOB_TYPES.includes(jobType) || !title?.trim()) throw new HttpError(422, 'VALIDATION', 'เลือกประเภทงานและกรอกหัวข้อ');
+  const { unitId, jobType, title, description, priority = 'NORMAL', preferredDate, contactName, contactPhone, workScope = 'INTERIOR' } = req.body;
+  if (!JOB_TYPES.includes(jobType) || !title?.trim() || !WORK_SCOPES.includes(workScope)) {
+    throw new HttpError(422, 'VALIDATION', 'เลือกประเภทงานและกรอกหัวข้อ');
+  }
   const [[unit]] = await pool.query(
     'SELECT u.unit_id FROM units u JOIN buildings b ON b.building_id = u.building_id WHERE u.unit_id = ? AND b.owner_user_id = ?',
     [unitId, user.id],
@@ -94,10 +102,13 @@ router.post('/api/jobs', requireRole('USER'), async (req, res) => {
   const job = await tx(user.id, async (conn) => {
     const code = await nextCode(conn, 'jobs', 'job_code', 'JB');
     const [r] = await conn.query(
-      `INSERT INTO jobs (job_code, job_type, unit_id, requester_id, title, description, priority, preferred_date, contact_name, contact_phone)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO jobs (job_code, job_type, unit_id, requester_id, title, description, priority, preferred_date, contact_name, contact_phone,
+                         work_scope, owner_approval)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [code, jobType, unitId, user.id, title.trim(), description ?? null, priority, preferredDate || null,
-       contactName || user.name, contactPhone ?? null],
+       contactName || user.name, contactPhone ?? null,
+       // แจ้งงานตรงจากเจ้าของตึกเอง (ตรวจแล้วว่าเป็นเจ้าของห้องนี้) จึงถือว่าอนุมัติแล้ว
+       workScope, workScope === 'STRUCTURAL' ? 'APPROVED' : 'NOT_REQUIRED'],
     );
     return { jobId: r.insertId, jobCode: code };
   });
@@ -131,10 +142,17 @@ router.post('/api/jobs/:id/assign', requireRole('ADMIN'), async (req, res) => {
 
     await conn.query('DELETE FROM job_assignments WHERE job_id = ?', [job.job_id]);
     for (const t of techs) {
-      await conn.query('INSERT INTO job_assignments (job_id, technician_id, technician_name, is_lead) VALUES (?, ?, ?, ?)', [
-        job.job_id, t.userId, t.fullName, t.userId === leadId ? 1 : 0,
-      ]);
+      await conn.query(
+        'INSERT INTO job_assignments (job_id, technician_id, technician_name, technician_phone, is_lead) VALUES (?, ?, ?, ?, ?)',
+        [job.job_id, t.userId, t.fullName, t.phone ?? null, t.userId === leadId ? 1 : 0],
+      );
     }
+    // ส่งให้ระบบจองห้องพักแค่ข้อมูลช่าง + ผู้ประสานงาน เพื่อใช้ติดต่อนัดหมายหน้างาน
+    await enqueueWebhook(conn, job, 'job.technicians_assigned', {
+      technicians: await technicianContacts(conn, job.job_id),
+      contact: COMPANY_CONTACT,
+      surveyDate: job.status === 'NEW' ? scheduledDate : null,
+    });
     if (job.status === 'NEW') {
       await conn.query('INSERT INTO site_surveys (job_id, survey_type, technician_id, scheduled_date) VALUES (?, ?, ?, ?)', [
         job.job_id, 'INITIAL', leadId, scheduledDate,
@@ -207,6 +225,7 @@ router.post('/api/jobs/:id/start', requireRole('ADMIN', 'TECHNICIAN'), async (re
     const job = await loadJob(conn, req.params.id, { lock: true });
     await assertLeadOrAdmin(conn, job, user);
     assertStatus(job, 'CONTRACTED');
+    assertOwnerApproved(job);
     await moveStatus(conn, job, 'IN_PROGRESS');
   });
   res.json(await getJobDetail(Number(req.params.id)));
@@ -261,6 +280,42 @@ router.post('/api/jobs/:id/cancel', requireRole('ADMIN', 'USER'), async (req, re
     await cancelJob(conn, job, req.body.reason || null);
   });
   res.json(await getJobDetail(Number(req.params.id)));
+});
+
+// ── อนุมัติจากเจ้าของหอ (เฉพาะงาน STRUCTURAL) ──
+// แอดมินโทรติดต่อเจ้าของหอตามข้อมูลใน owner_contacts แล้วบันทึกผล
+router.post('/api/jobs/:id/owner-approval', requireRole('ADMIN'), async (req, res) => {
+  const { decision, note } = req.body;
+  await tx(currentUser(req).id, async (conn) => {
+    const job = await loadJob(conn, req.params.id, { lock: true });
+    await recordOwnerDecision(conn, job, decision, note);
+    if (decision === 'REJECTED') await cancelJob(conn, job, `เจ้าของหอไม่อนุมัติ${note ? `: ${note}` : ''}`);
+  });
+  res.json(await getJobDetail(Number(req.params.id)));
+});
+
+// ขอข้อมูลติดต่อเจ้าของหอจากระบบจองห้องพักอีกครั้ง (กรณีครั้งแรกเรียก API ไม่สำเร็จ)
+router.post('/api/jobs/:id/owner-contact/refresh', requireRole('ADMIN'), async (req, res) => {
+  const job = await loadJob(pool, req.params.id);
+  if (job.work_scope !== 'STRUCTURAL' || !job.partner_id) throw new HttpError(409, 'INVALID_STATUS', 'ใช้ได้กับงานโครงสร้างจากพาร์ทเนอร์เท่านั้น');
+  const owner = await fetchOwnerContact(job.job_id);
+  if (!owner) throw new HttpError(502, 'PARTNER_API_ERROR', 'ขอข้อมูลเจ้าของหอจากระบบจองห้องพักไม่สำเร็จ ลองใหม่หรือกรอกเอง');
+  res.json(await getJobDetail(job.job_id));
+});
+
+// แอดมินกรอกข้อมูลติดต่อเจ้าของหอเอง (เช่น ระบบพาร์ทเนอร์ล่ม)
+router.put('/api/jobs/:id/owner-contact', requireRole('ADMIN'), async (req, res) => {
+  const { ownerName, ownerPhone, ownerEmail } = req.body;
+  if (!ownerName?.trim() || !ownerPhone?.trim()) throw new HttpError(422, 'VALIDATION', 'กรอกชื่อและเบอร์โทรเจ้าของหอ');
+  const job = await loadJob(pool, req.params.id);
+  if (job.work_scope !== 'STRUCTURAL') throw new HttpError(409, 'INVALID_STATUS', 'ใช้ได้กับงานโครงสร้างเท่านั้น');
+  await pool.query(
+    `INSERT INTO owner_contacts (job_id, owner_name, owner_phone, owner_email, source, fetched_at) VALUES (?, ?, ?, ?, 'MANUAL', NOW())
+     ON DUPLICATE KEY UPDATE owner_name = VALUES(owner_name), owner_phone = VALUES(owner_phone), owner_email = VALUES(owner_email),
+                             source = 'MANUAL', fetch_error = NULL, fetched_at = NOW()`,
+    [job.job_id, ownerName.trim(), ownerPhone.trim(), ownerEmail?.trim() || null],
+  );
+  res.json(await getJobDetail(job.job_id));
 });
 
 export async function cancelJob(conn, job, reason) {

@@ -28,6 +28,40 @@ export function assertStatus(job, ...allowed) {
   }
 }
 
+// งาน STRUCTURAL (เปลี่ยนแปลงตัวอาคาร/ทำร้านค้า) ต้องให้เจ้าของหออนุมัติก่อนส่งสัญญาหรือเริ่มงาน
+export function assertOwnerApproved(job) {
+  if (job.owner_approval === 'PENDING') {
+    throw new HttpError(409, 'OWNER_APPROVAL_REQUIRED', 'งานนี้เปลี่ยนแปลงตัวอาคาร ต้องรอเจ้าของหออนุมัติก่อน');
+  }
+  if (job.owner_approval === 'REJECTED') throw new HttpError(409, 'OWNER_REJECTED', 'เจ้าของหอไม่อนุมัติงานนี้');
+}
+
+// บันทึกผลอนุมัติของเจ้าของหอ (แอดมินโทรถามเอง หรือระบบจองห้องพักส่งผลมาทาง API)
+// REJECTED → ยกเลิกงาน (cancel ทำโดยผู้เรียก เพราะอยู่ใน routes/jobs.js)
+export async function recordOwnerDecision(conn, job, decision, note) {
+  if (!['APPROVED', 'REJECTED'].includes(decision)) throw new HttpError(422, 'VALIDATION', 'decision ต้องเป็น APPROVED หรือ REJECTED');
+  if (job.owner_approval !== 'PENDING') throw new HttpError(409, 'INVALID_STATUS', 'งานนี้ไม่ได้รอการอนุมัติจากเจ้าของหอ');
+  assertStatus(job, 'NEW', 'SURVEY_ASSIGNED', 'SURVEYED', 'QUOTED');
+  await conn.query('UPDATE jobs SET owner_approval = ? WHERE job_id = ?', [decision, job.job_id]);
+  await conn.query('UPDATE owner_contacts SET decided_at = NOW(), decision_note = ? WHERE job_id = ?', [note || null, job.job_id]);
+  job.owner_approval = decision;
+  await enqueueWebhook(conn, job, 'owner.approval_changed', { ownerApproval: decision, note: note || null });
+}
+
+// ข้อมูลที่ส่งให้พาร์ทเนอร์ = แค่ช่างที่รับงาน + ผู้ประสานงานฝั่งเรา (ไม่ส่งข้อมูลภายใน เช่น ค่าแรงช่าง)
+export const COMPANY_CONTACT = {
+  name: process.env.COMPANY_CONTACT_NAME ?? 'ฝ่ายประสานงาน RenoCare',
+  phone: process.env.COMPANY_CONTACT_PHONE ?? '020000000',
+};
+
+export async function technicianContacts(conn, jobId) {
+  const [rows] = await conn.query(
+    'SELECT technician_name, technician_phone, is_lead FROM job_assignments WHERE job_id = ? ORDER BY is_lead DESC, assigned_at',
+    [jobId],
+  );
+  return rows.map((t) => ({ name: t.technician_name, phone: t.technician_phone, isLead: Boolean(t.is_lead) }));
+}
+
 // trigger trg_jobs_after_update บันทึกประวัติ + ใส่ webhook ให้พาร์ทเนอร์เอง
 export async function moveStatus(conn, job, to, remark = null) {
   await conn.query('SET @status_remark = ?', [remark]);
@@ -59,6 +93,7 @@ export async function getJobDetail(jobId) {
      LEFT JOIN partners p ON p.partner_id = j.partner_id WHERE j.job_id = ?`,
     [jobId],
   );
+  const [[ownerContact]] = await pool.query('SELECT * FROM owner_contacts WHERE job_id = ?', [jobId]);
   const [assignments, surveys, surveyItems, contracts, contractItems, invoices, workLogs, statusLogs] = await Promise.all([
     q('SELECT * FROM job_assignments WHERE job_id = ? ORDER BY is_lead DESC, assigned_at'),
     q('SELECT * FROM site_surveys WHERE job_id = ? ORDER BY survey_id'),
@@ -71,6 +106,7 @@ export async function getJobDetail(jobId) {
   ]);
   return {
     ...camel(job),
+    ownerContact: ownerContact ? camel(ownerContact) : null,
     assignments,
     surveys: surveys.map((s) => ({ ...s, items: surveyItems.filter((i) => i.surveyId === s.surveyId) })),
     contracts: contracts.map((c) => ({

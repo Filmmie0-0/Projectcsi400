@@ -88,6 +88,20 @@ app.post('/mock-partner/webhook', express.raw({ type: '*/*' }), (req, res) => {
 
 app.get('/api/mock-partner/events', (_req, res) => res.json(partnerInbox));
 
+// API ฝั่งระบบจองห้องพักที่ job-service เรียกมาขอข้อมูลติดต่อเจ้าของหอ (งาน STRUCTURAL)
+// ของจริงอยู่บน server ของเพื่อนและอ่านจาก database ของระบบจองเอง
+const MOCK_PARTNER_OUTBOUND_KEY = process.env.MOCK_PARTNER_OUTBOUND_KEY ?? 'rnc_out_demo_4b8d2f';
+const mockOwners = {
+  'DB-BLD-001': { name: 'คุณประเสริฐ ริมคลอง', phone: '0899999999', email: 'owner@riverside.local' },
+};
+
+app.get('/mock-partner/api/buildings/:ref/owner', (req, res) => {
+  if (req.get('X-API-Key') !== MOCK_PARTNER_OUTBOUND_KEY) return res.status(401).json({ message: 'invalid api key' });
+  const owner = mockOwners[req.params.ref];
+  if (!owner) return res.status(404).json({ message: 'building not found' });
+  res.json(owner);
+});
+
 // ── Auth ──
 app.use('/api', async (req, res, next) => {
   const path = req.originalUrl.split('?')[0];

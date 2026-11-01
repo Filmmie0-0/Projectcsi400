@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { pool, tx, nextCode } from '../db.js';
 import { HttpError, camel, currentUser, requireRole } from '../http.js';
-import { assertStatus, buildInstallments, enqueueWebhook, getJobDetail, loadJob, moveStatus } from '../jobs.js';
+import { assertOwnerApproved, assertStatus, buildInstallments, enqueueWebhook, getJobDetail, loadJob, moveStatus } from '../jobs.js';
 
 export const router = Router();
 
@@ -75,6 +75,7 @@ router.post('/api/contracts/:id/send', requireRole('ADMIN'), async (req, res) =>
   const jobId = await tx(currentUser(req).id, async (conn) => {
     const c = await loadContract(conn, req.params.id, 'DRAFT');
     const job = await loadJob(conn, c.job_id, { lock: true });
+    assertOwnerApproved(job);
     await conn.query(`UPDATE contracts SET status = 'SENT', sent_at = NOW() WHERE contract_id = ?`, [c.contract_id]);
     await enqueueWebhook(conn, job, 'contract.sent', contractPayload(c));
     if (c.contract_type === 'MAIN') await moveStatus(conn, job, 'QUOTED', `ส่งสัญญา ${c.contract_no}`);

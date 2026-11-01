@@ -123,17 +123,27 @@ inventory_db:  materials 1─N stock_movements ; requisitions 1─N requisition_
   "description": "ย้ายออก 20 ต.ค.",
   "priority": "URGENT",
   "preferredDate": "2026-10-21",
-  "contact": { "name": "คุณนิด", "phone": "0822222222" }
+  "contact": { "name": "คุณนิด", "phone": "0822222222" },
+  "workScope": "INTERIOR"
 }
 ```
 - `201` สร้างงานใหม่ / `200` externalRef นี้เคยส่งแล้ว (คืนงานเดิม) — ส่งซ้ำได้ปลอดภัยเมื่อ network มีปัญหา
 - ตึก/ห้องถูกสร้างหรืออัปเดตอัตโนมัติจาก `externalRef`
 - `jobType`: `INSPECTION` | `RENOVATION`, `unitType`: `ROOM` | `COMMON` | `UNDER_BUILDING`
+- `workScope` (ไม่ส่ง = `INTERIOR`) แบ่งงานเป็น 2 กรณี:
 
-ตอบกลับ: `{ "jobCode": "JB2610-0005", "externalRef": "...", "jobType": "...", "title": "...", "status": "NEW", "createdAt": "...", "completedAt": null }`
+| workScope | ตัวอย่าง | ต้องขออนุญาตเจ้าของหอ | ผลในระบบ |
+| --- | --- | --- | --- |
+| `INTERIOR` | ตรวจห้องย้ายออก, ซ่อมก๊อก, ทาสีในห้อง | ไม่ต้อง | `ownerApproval = NOT_REQUIRED` ทำงานต่อได้ทันที |
+| `STRUCTURAL` | ทุบผนัง, ทำพื้นที่ใต้ตึกเป็นร้านโชว์ห่วย/อาคารพาณิชย์ | ต้อง | `ownerApproval = PENDING` — ประเมินหน้างานได้ แต่ **ส่งสัญญาและเริ่มงานไม่ได้** จนกว่าจะ `APPROVED` |
+
+  งาน `STRUCTURAL` ส่ง `"owner": { "name": "...", "phone": "...", "email": "..." }` มาด้วยได้
+  ถ้าไม่ส่ง RenoCare จะเรียก API ของ DormBook เอง (ดู 5.5)
+
+ตอบกลับ: `{ "jobCode": "JB2610-0005", "externalRef": "...", "jobType": "...", "title": "...", "workScope": "INTERIOR", "ownerApproval": "NOT_REQUIRED", "status": "NEW", "createdAt": "...", "completedAt": null }`
 
 ### 5.2 ดูสถานะ — `GET /jobs/{externalRef}`
-เพิ่ม `latestSurvey` (สรุปผลตรวจ, ต้องซ่อมไหม), `contracts` (ยอด, ช่วงวันที่), `progressPct`
+เพิ่ม `technicians` (`[{ name, phone, isLead }]`), `contact` (ผู้ประสานงานฝั่ง RenoCare), `latestSurvey` (สรุปผลตรวจ, ต้องซ่อมไหม), `contracts` (ยอด, ช่วงวันที่), `progressPct`
 
 ### 5.3 ยกเลิก — `POST /jobs/{externalRef}/cancel`  `{ "reason": "..." }`
 ยกเลิกได้ก่อนลูกค้าเซ็นสัญญาเท่านั้น (ไม่งั้น `409 INVALID_STATUS`)
@@ -148,6 +158,8 @@ Header `X-Signature: sha256=<HMAC-SHA256(webhook_secret, raw body)>` และ `
 | `survey.submitted` | ช่างส่งผลตรวจ/ประเมินเพิ่ม | `needRepair`, `estDays`, `items[]` (area, item, condition, action) |
 | `contract.sent` / `contract.signed` | ส่งสัญญา / ลงนาม | `contractNo`, `billingType`, `totalAmount`, `startDate`, `endDate` |
 | `job.progress` | ช่างบันทึกงานรายวัน | `progressPct`, `workDate`, `note` |
+| `job.technicians_assigned` | แอดมินมอบหมาย/เปลี่ยนช่าง | `technicians[]` (name, phone, isLead), `contact` (name, phone), `surveyDate` |
+| `owner.approval_changed` | เจ้าของหออนุมัติ/ไม่อนุมัติ (งาน STRUCTURAL) | `ownerApproval`, `note` |
 
 ทุก event มี `jobCode`, `externalRef`, `occurredAt`
 
@@ -155,10 +167,22 @@ Header `X-Signature: sha256=<HMAC-SHA256(webhook_secret, raw body)>` และ `
 - `to = IN_PROGRESS` → ปิดห้องไม่ให้จอง, `to = COMPLETED` → เปิดห้องให้จองได้
 - `survey.submitted` + `needRepair = false` → คืนเงินประกันผู้เช่าได้
 
-### Error format (ทุก endpoint)
-`{ "code": "INVALID_STATUS", "message": "ข้อความภาษาไทย" }` — `401 INVALID_API_KEY`, `404 JOB_NOT_FOUND`, `409 INVALID_STATUS`, `422 VALIDATION`
+### 5.5 API ที่ DormBook ต้องเปิดให้ RenoCare เรียก (server → server, งาน STRUCTURAL)
+RenoCare เรียกด้วย Header `X-API-Key: <outbound_api_key>` (คนละคีย์กับที่ DormBook ใช้เรียกเรา, ตั้งที่ `partners.api_base_url` / `outbound_api_key`)
 
-> ถ้าระบบของเพื่อนมี API อยู่แล้ว (เช่น อยากให้ RenoCare เป็นฝ่ายดึงข้อมูลห้อง) เพิ่มเป็น client ใน job-service ได้โดยไม่กระทบโครงสร้างนี้
+`GET {api_base_url}/buildings/{building.externalRef}/owner` → `200 { "name": "...", "phone": "...", "email": "..." }`
+
+- เรียกครั้งเดียวตอนรับงาน STRUCTURAL ที่ไม่มี `owner` มาด้วย แล้วเก็บสำเนาใน `owner_contacts` (job_db) — **ไม่เข้าถึง database ของ DormBook**
+- เรียกไม่สำเร็จ: บันทึก `fetch_error` ไว้ แอดมินกด `POST /api/jobs/{id}/owner-contact/refresh` หรือกรอกเอง `PUT /api/jobs/{id}/owner-contact`
+
+### 5.6 ส่งผลอนุมัติของเจ้าของหอ — `POST /jobs/{externalRef}/owner-approval`  `{ "decision": "APPROVED" | "REJECTED", "note": "..." }`
+ใช้เมื่อ DormBook ถามเจ้าของหอในระบบตัวเอง (อีกทางคือแอดมิน RenoCare โทรถามแล้วบันทึกที่ `POST /api/jobs/{id}/owner-approval`)
+`REJECTED` → งานถูกยกเลิกอัตโนมัติ
+
+### Error format (ทุก endpoint)
+`{ "code": "INVALID_STATUS", "message": "ข้อความภาษาไทย" }` — `401 INVALID_API_KEY`, `404 JOB_NOT_FOUND`, `409 INVALID_STATUS` / `OWNER_APPROVAL_REQUIRED` / `OWNER_REJECTED`, `422 VALIDATION`
+
+ภาพรวมแบบ flowchart สำหรับคุยกับทีม DormBook: [partner-integration-flow.md](partner-integration-flow.md)
 
 ## 6. แบ่งงาน Dev 2 คน (แบ่งตาม service แนวตั้ง ลด merge conflict)
 

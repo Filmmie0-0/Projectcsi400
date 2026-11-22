@@ -10,12 +10,14 @@ import JobStatusStepper from '../../components/features/job/JobStatusStepper';
 import AssignTechnicianModal from '../../components/features/job/AssignTechnicianModal';
 import SurveySection from '../../components/features/job/SurveySection';
 import ContractSection from '../../components/features/job/ContractSection';
+import OwnerApprovalCard from '../../components/features/job/OwnerApprovalCard';
 import WorkLogSection from '../../components/features/job/WorkLogSection';
 import JobRequisitionSection from '../../components/features/inventory/JobRequisitionSection';
 import { JOB_STATUS, JOB_TYPE, PRIORITY, UNIT_TYPE } from '../../constants/labels';
 import { useJob, useJobMutation } from '../../hooks/useJobs';
 import { jobService } from '../../services/jobService';
 import { useAuthStore } from '../../store/authStore';
+import { confirmDialog, promptDialog } from '../../store/dialogStore';
 import { formatDate, formatDateTime } from '../../utils/formatDate';
 import type { JobDetail } from '../../types/job';
 
@@ -42,6 +44,7 @@ export default function JobDetailPage() {
               {user.role !== 'USER' && <JobRequisitionSection job={job.data} role={user.role} userId={user.userId} />}
             </div>
             <div className="space-y-6">
+              <OwnerApprovalCard job={job.data} role={user.role} />
               <Actions job={job.data} />
               <InfoCard job={job.data} />
               <History job={job.data} />
@@ -90,21 +93,30 @@ function Actions({ job }: { job: JobDetail }) {
       <Button key="start" onClick={() => start.mutate([job.jobId])} disabled={start.isPending}>เริ่มงาน</Button>
     ),
     (isAdmin || isLead) && job.status === 'IN_PROGRESS' && (
-      <Button key="complete" onClick={() => window.confirm('ยืนยันส่งมอบงาน?') && complete.mutate([job.jobId])} disabled={complete.isPending}>
+      <Button
+        key="complete"
+        onClick={async () => (await confirmDialog({ title: 'ส่งมอบงาน / ปิดงาน?', message: `ยืนยันว่างาน ${job.jobCode} เสร็จเรียบร้อยและส่งมอบให้ลูกค้าแล้ว`, confirmText: 'ส่งมอบงาน' })) && complete.mutate([job.jobId])}
+        disabled={complete.isPending}
+      >
         ส่งมอบงาน / ปิดงาน
       </Button>
     ),
-    isAdmin && job.status === 'SURVEYED' && job.jobType === 'INSPECTION' && (
-      <Button key="close-inspection" variant="secondary" onClick={() => complete.mutate([job.jobId, 'ส่งผลตรวจห้องแล้ว ลูกค้าไม่ซ่อม'])}>
-        ปิดงานตรวจ (ไม่ซ่อม)
+    isAdmin && job.status === 'SURVEYED' && (
+      <Button
+        key="close-no-repair"
+        variant={noRepair(job) ? 'primary' : 'secondary'}
+        onClick={async () => (await confirmDialog({ title: 'ปิดงานโดยไม่ทำสัญญา?', message: 'งานจะเปลี่ยนเป็น "เสร็จสิ้น" และไม่มีการร่างสัญญา', confirmText: 'ปิดงาน' })) && complete.mutate([job.jobId, job.jobType === 'INSPECTION' ? 'ส่งผลตรวจห้องแล้ว ลูกค้าไม่ซ่อม' : 'ประเมินแล้ว ไม่มีงานซ่อม'])}
+        disabled={complete.isPending}
+      >
+        ปิดงาน (ไม่ซ่อม)
       </Button>
     ),
     ((isAdmin && open) || (user.role === 'USER' && ['NEW', 'SURVEY_ASSIGNED', 'SURVEYED', 'QUOTED'].includes(job.status))) && (
       <Button
         key="cancel"
         variant="ghost"
-        onClick={() => {
-          const reason = window.prompt('เหตุผลที่ยกเลิกงาน');
+        onClick={async () => {
+          const reason = await promptDialog({ title: `ยกเลิกงาน ${job.jobCode}`, input: { label: 'เหตุผลที่ยกเลิกงาน' }, confirmText: 'ยกเลิกงาน', danger: true });
           if (reason !== null) cancel.mutate([job.jobId, reason]);
         }}
       >
@@ -124,7 +136,18 @@ function Actions({ job }: { job: JobDetail }) {
   );
 }
 
+// ผลประเมินครั้งแรกบอกว่าไม่ต้องซ่อม → ไม่มีสัญญาให้ร่าง
+function noRepair(job: JobDetail) {
+  return job.surveys.some((s) => s.surveyType === 'INITIAL' && s.status === 'SUBMITTED' && s.needRepair === 0);
+}
+
 function nextStepHint(job: JobDetail, role: string) {
+  if (job.ownerApproval === 'PENDING' && ['SURVEYED', 'QUOTED', 'CONTRACTED'].includes(job.status)) {
+    return ({ ADMIN: 'โทรขออนุมัติจากเจ้าของหอ แล้วบันทึกผลในการ์ด "อนุมัติจากเจ้าของหอ" ก่อนส่งสัญญา', USER: 'รอเจ้าของหออนุมัติงาน', TECHNICIAN: 'รอเจ้าของหออนุมัติงาน' } as Record<string, string>)[role];
+  }
+  if (job.status === 'SURVEYED' && noRepair(job)) {
+    return ({ ADMIN: 'ช่างประเมินว่าไม่ต้องซ่อม — กด "ปิดงาน (ไม่ซ่อม)"', USER: 'ช่างประเมินว่าไม่ต้องซ่อม รอแอดมินปิดงาน', TECHNICIAN: 'ประเมินว่าไม่ต้องซ่อม รอแอดมินปิดงาน' } as Record<string, string>)[role];
+  }
   const hints: Partial<Record<JobDetail['status'], Record<string, string>>> = {
     NEW: { ADMIN: 'มอบหมายช่างและนัดวันประเมินหน้างาน', USER: 'รอแอดมินนัดช่างเข้าประเมิน' },
     SURVEY_ASSIGNED: { TECHNICIAN: 'เข้าหน้างานตามนัดแล้วบันทึกผลประเมิน', ADMIN: 'รอช่างส่งผลประเมิน', USER: 'ช่างจะเข้าประเมินตามวันนัด' },

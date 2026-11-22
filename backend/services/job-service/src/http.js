@@ -24,6 +24,7 @@ export const camel = (row) =>
 
 export function errorHandler(err, _req, res, _next) {
   if (err instanceof HttpError) return res.status(err.status).json({ code: err.code, message: err.message });
+  if (err.type === 'entity.too.large') return res.status(413).json({ code: 'FILE_TOO_LARGE', message: 'ไฟล์ใหญ่เกิน 5 MB' });
   if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ code: 'DUPLICATE', message: 'ข้อมูลซ้ำกับที่มีอยู่แล้ว' });
   // SIGNAL จาก trigger: ข้อความรูปแบบ 'CODE: ข้อความภาษาไทย'
   if (err.sqlState === '45000') {

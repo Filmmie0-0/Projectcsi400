@@ -11,6 +11,7 @@ import Modal from '../../components/ui/Modal';
 import { useDeliveries, usePartnerMutation, usePartners } from '../../hooks/usePartners';
 import { useUsers } from '../../hooks/useUsers';
 import { partnerService } from '../../services/partnerService';
+import { confirmDialog } from '../../store/dialogStore';
 import { formatDateTime } from '../../utils/formatDate';
 
 // พาร์ทเนอร์ = ระบบภายนอก (เช่น ระบบจองห้องพักของเพื่อน) ที่ส่งงานเข้ามาด้วย API key และรับ webhook กลับ
@@ -48,9 +49,11 @@ export default function PartnersPage() {
                 <Button
                   variant="ghost"
                   className="mt-2 px-0"
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     e.stopPropagation();
-                    if (window.confirm('ออกคีย์ใหม่? คีย์เดิมจะใช้ไม่ได้ทันที')) rotate.mutate([p.partnerId], { onSuccess: setSecret });
+                    if (await confirmDialog({ title: 'ออก API key ใหม่?', message: 'คีย์เดิมจะใช้ไม่ได้ทันที ระบบพาร์ทเนอร์ต้องเปลี่ยนไปใช้คีย์ใหม่', confirmText: 'ออกคีย์ใหม่', danger: true })) {
+                      rotate.mutate([p.partnerId], { onSuccess: setSecret });
+                    }
                   }}
                 >
                   <RefreshCw className="h-4 w-4" /> ออก API key ใหม่

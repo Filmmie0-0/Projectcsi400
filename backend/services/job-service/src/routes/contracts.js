@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { pool, tx, nextCode } from '../db.js';
 import { HttpError, camel, currentUser, requireRole } from '../http.js';
 import { assertOwnerApproved, assertStatus, buildInstallments, enqueueWebhook, getJobDetail, loadJob, moveStatus } from '../jobs.js';
@@ -71,11 +71,89 @@ router.delete('/api/contracts/:id', requireRole('ADMIN'), async (req, res) => {
   res.status(204).end();
 });
 
+// ── ไฟล์แนบสัญญา (รูป/PDF) ──
+// อัปโหลดเป็น binary ตรง ๆ (Content-Type = ชนิดไฟล์, ?name= ชื่อไฟล์) ไม่ต้องใช้ multipart
+const MAX_FILE_BYTES = 5 * 1024 * 1024;
+const FILE_TYPES = {
+  'image/jpeg': (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  'image/png': (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  'image/webp': (b) => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP',
+  'application/pdf': (b) => b.subarray(0, 5).toString('latin1') === '%PDF-',
+};
+const rawFile = express.raw({ type: Object.keys(FILE_TYPES), limit: MAX_FILE_BYTES });
+
+function readUpload(req) {
+  const mime = req.get('Content-Type')?.split(';')[0].trim();
+  if (!Buffer.isBuffer(req.body) || !req.body.length || !FILE_TYPES[mime]) {
+    throw new HttpError(422, 'INVALID_FILE', 'แนบได้เฉพาะไฟล์ JPG, PNG, WebP หรือ PDF ขนาดไม่เกิน 5 MB');
+  }
+  if (!FILE_TYPES[mime](req.body)) throw new HttpError(422, 'INVALID_FILE', 'เนื้อไฟล์ไม่ตรงกับชนิดไฟล์');
+  const name = String(req.query.name ?? '').replace(/[\\/\r\n"]/g, '_').trim().slice(0, 200) || 'file';
+  return { name, mime, data: req.body };
+}
+
+const insertFile = (conn, contractId, kind, f, userId) =>
+  conn.query(
+    'INSERT INTO contract_files (contract_id, kind, file_name, mime_type, size_bytes, data, uploaded_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [contractId, kind, f.name, f.mime, f.data.length, f.data, userId],
+  );
+
+// แอดมินแนบไฟล์สัญญาได้ตอนยังเป็นฉบับร่าง
+router.post('/api/contracts/:id/files', requireRole('ADMIN'), rawFile, async (req, res) => {
+  const user = currentUser(req);
+  const file = readUpload(req);
+  const jobId = await tx(user.id, async (conn) => {
+    const c = await loadContract(conn, req.params.id, 'DRAFT');
+    await insertFile(conn, c.contract_id, 'CONTRACT', file, user.id);
+    return c.job_id;
+  });
+  res.status(201).json(await getJobDetail(jobId));
+});
+
+router.delete('/api/contracts/:id/files/:fileId', requireRole('ADMIN'), async (req, res) => {
+  const jobId = await tx(currentUser(req).id, async (conn) => {
+    const c = await loadContract(conn, req.params.id, 'DRAFT');
+    const [r] = await conn.query(`DELETE FROM contract_files WHERE file_id = ? AND contract_id = ? AND kind = 'CONTRACT'`,
+      [req.params.fileId, c.contract_id]);
+    if (!r.affectedRows) throw new HttpError(404, 'NOT_FOUND', 'ไม่พบไฟล์');
+    return c.job_id;
+  });
+  res.json(await getJobDetail(jobId));
+});
+
+// ดูไฟล์: แอดมิน, ช่างในทีมของงาน, ลูกค้าเจ้าของงาน (หลังสัญญาถูกส่งแล้ว)
+router.get('/api/contracts/:id/files/:fileId', requireRole('ADMIN', 'USER', 'TECHNICIAN'), async (req, res) => {
+  const user = currentUser(req);
+  const [[f]] = await pool.query(
+    `SELECT f.*, c.status AS contract_status, j.job_id, j.requester_id
+     FROM contract_files f JOIN contracts c ON c.contract_id = f.contract_id JOIN jobs j ON j.job_id = c.job_id
+     WHERE f.file_id = ? AND f.contract_id = ?`,
+    [req.params.fileId, req.params.id],
+  );
+  let allowed = Boolean(f) && user.role === 'ADMIN';
+  if (f && user.role === 'USER') allowed = f.requester_id === user.id && f.contract_status !== 'DRAFT';
+  if (f && user.role === 'TECHNICIAN') {
+    const [[a]] = await pool.query('SELECT 1 FROM job_assignments WHERE job_id = ? AND technician_id = ?', [f.job_id, user.id]);
+    allowed = Boolean(a);
+  }
+  if (!allowed) throw new HttpError(404, 'NOT_FOUND', 'ไม่พบไฟล์');
+  res.set({
+    'Content-Type': f.mime_type,
+    'Content-Length': f.size_bytes,
+    'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(f.file_name)}`,
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'private, max-age=3600',
+  });
+  res.end(f.data);
+});
+
 router.post('/api/contracts/:id/send', requireRole('ADMIN'), async (req, res) => {
   const jobId = await tx(currentUser(req).id, async (conn) => {
     const c = await loadContract(conn, req.params.id, 'DRAFT');
     const job = await loadJob(conn, c.job_id, { lock: true });
     assertOwnerApproved(job);
+    const [[{ n }]] = await conn.query(`SELECT COUNT(*) AS n FROM contract_files WHERE contract_id = ? AND kind = 'CONTRACT'`, [c.contract_id]);
+    if (!n) throw new HttpError(422, 'NO_CONTRACT_FILE', 'แนบไฟล์สัญญาก่อนส่งให้ลูกค้า');
     await conn.query(`UPDATE contracts SET status = 'SENT', sent_at = NOW() WHERE contract_id = ?`, [c.contract_id]);
     await enqueueWebhook(conn, job, 'contract.sent', contractPayload(c));
     if (c.contract_type === 'MAIN') await moveStatus(conn, job, 'QUOTED', `ส่งสัญญา ${c.contract_no}`);
@@ -84,15 +162,17 @@ router.post('/api/contracts/:id/send', requireRole('ADMIN'), async (req, res) =>
   res.json(await getJobDetail(jobId));
 });
 
-// ลูกค้าเซ็นสัญญา → สร้างงวดชำระ, สัญญาหลักทำให้งานเป็น CONTRACTED
-router.post('/api/contracts/:id/sign', requireRole('USER'), async (req, res) => {
+// ลูกค้าแนบรูปสัญญาที่เซ็นแล้วส่งกลับ = ลงนาม → สร้างงวดชำระ, สัญญาหลักทำให้งานเป็น CONTRACTED
+// ชื่อผู้ลงนามใช้ชื่อบัญชีที่ล็อกอิน (ไม่ต้องพิมพ์เอง)
+router.post('/api/contracts/:id/sign', requireRole('USER'), rawFile, async (req, res) => {
   const user = currentUser(req);
-  const signedName = req.body.signedName?.trim();
-  if (!signedName) throw new HttpError(422, 'VALIDATION', 'กรุณาพิมพ์ชื่อผู้ลงนาม');
+  const file = readUpload(req);
+  const signedName = user.name || `ผู้ใช้ #${user.id}`;
   const jobId = await tx(user.id, async (conn) => {
     const c = await loadContract(conn, req.params.id, 'SENT');
     const job = await loadJob(conn, c.job_id, { lock: true });
     if (job.requester_id !== user.id) throw new HttpError(404, 'NOT_FOUND', 'ไม่พบสัญญา');
+    await insertFile(conn, c.contract_id, 'SIGNED', file, user.id);
     await conn.query(
       `UPDATE contracts SET status = 'SIGNED', signed_by = ?, signed_name = ?, signed_at = NOW() WHERE contract_id = ?`,
       [user.id, signedName, c.contract_id],

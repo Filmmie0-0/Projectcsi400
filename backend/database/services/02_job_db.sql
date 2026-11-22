@@ -216,6 +216,23 @@ CREATE TABLE contract_items (
   CONSTRAINT chk_citem_qty CHECK (qty > 0 AND unit_price >= 0)
 ) ENGINE=InnoDB;
 
+-- ไฟล์แนบสัญญา: CONTRACT = แอดมินแนบตัวสัญญาส่งให้ลูกค้า, SIGNED = ลูกค้าแนบรูปสัญญาที่เซ็นแล้วส่งกลับ
+-- เก็บใน DB (ไม่เกิน 5 MB/ไฟล์) จึงไม่ต้องมี volume เก็บไฟล์แยก
+CREATE TABLE contract_files (
+  file_id      BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  contract_id  BIGINT UNSIGNED NOT NULL,
+  kind         ENUM('CONTRACT','SIGNED') NOT NULL,
+  file_name    VARCHAR(200) NOT NULL,
+  mime_type    VARCHAR(50) NOT NULL,
+  size_bytes   INT UNSIGNED NOT NULL,
+  data         MEDIUMBLOB NOT NULL,
+  uploaded_by  BIGINT UNSIGNED NOT NULL,
+  created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (file_id),
+  KEY idx_cfile_contract (contract_id),
+  CONSTRAINT fk_cfile_contract FOREIGN KEY (contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 -- งวดชำระ: DAILY = มัดจำ 30% + ส่วนที่เหลือ, MONTHLY = เดือนละงวด (งวดแรกรวมค่าวัสดุ) สร้างตอนเซ็นสัญญา
 CREATE TABLE invoices (
   invoice_id      BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

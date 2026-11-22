@@ -256,8 +256,9 @@ router.post('/api/jobs/:id/complete', requireRole('ADMIN', 'TECHNICIAN'), async 
   await tx(user.id, async (conn) => {
     const job = await loadJob(conn, req.params.id, { lock: true });
     await assertLeadOrAdmin(conn, job, user);
-    if (job.status === 'SURVEYED' && job.job_type === 'INSPECTION' && user.role === 'ADMIN') {
-      await moveStatus(conn, job, 'COMPLETED', req.body.remark || 'ส่งผลตรวจห้องแล้ว ไม่มีงานซ่อม');
+    // ประเมินแล้วแต่ไม่ทำสัญญา (ไม่ต้องซ่อม/ลูกค้าไม่ซ่อม): แอดมินปิดงานได้ทุกประเภท
+    if (job.status === 'SURVEYED' && user.role === 'ADMIN') {
+      await moveStatus(conn, job, 'COMPLETED', req.body.remark || 'ประเมินแล้ว ไม่มีงานซ่อม');
       return;
     }
     assertStatus(job, 'IN_PROGRESS');

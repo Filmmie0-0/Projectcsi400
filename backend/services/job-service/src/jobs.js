@@ -94,12 +94,15 @@ export async function getJobDetail(jobId) {
     [jobId],
   );
   const [[ownerContact]] = await pool.query('SELECT * FROM owner_contacts WHERE job_id = ?', [jobId]);
-  const [assignments, surveys, surveyItems, contracts, contractItems, invoices, workLogs, statusLogs] = await Promise.all([
+  const [assignments, surveys, surveyItems, contracts, contractItems, contractFiles, invoices, workLogs, statusLogs] = await Promise.all([
     q('SELECT * FROM job_assignments WHERE job_id = ? ORDER BY is_lead DESC, assigned_at'),
     q('SELECT * FROM site_surveys WHERE job_id = ? ORDER BY survey_id'),
     q('SELECT i.* FROM survey_items i JOIN site_surveys s ON s.survey_id = i.survey_id WHERE s.job_id = ? ORDER BY i.item_id'),
     q('SELECT * FROM contracts WHERE job_id = ? ORDER BY contract_id'),
     q('SELECT i.* FROM contract_items i JOIN contracts c ON c.contract_id = i.contract_id WHERE c.job_id = ? ORDER BY i.item_id'),
+    // ไม่ดึงคอลัมน์ data (ตัวไฟล์) โหลดแยกที่ GET /api/contracts/:id/files/:fileId
+    q(`SELECT f.file_id, f.contract_id, f.kind, f.file_name, f.mime_type, f.size_bytes, f.uploaded_by, f.created_at
+       FROM contract_files f JOIN contracts c ON c.contract_id = f.contract_id WHERE c.job_id = ? ORDER BY f.file_id`),
     q('SELECT v.* FROM invoices v JOIN contracts c ON c.contract_id = v.contract_id WHERE c.job_id = ? ORDER BY v.contract_id, v.installment_no'),
     q('SELECT * FROM work_logs WHERE job_id = ? ORDER BY work_date DESC, log_id DESC'),
     q('SELECT * FROM job_status_logs WHERE job_id = ? ORDER BY created_at, log_id'),
@@ -112,6 +115,7 @@ export async function getJobDetail(jobId) {
     contracts: contracts.map((c) => ({
       ...c,
       items: contractItems.filter((i) => i.contractId === c.contractId),
+      files: contractFiles.filter((f) => f.contractId === c.contractId),
       invoices: invoices.filter((v) => v.contractId === c.contractId),
     })),
     workLogs,

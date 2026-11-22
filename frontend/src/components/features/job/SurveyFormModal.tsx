@@ -23,7 +23,8 @@ export default function SurveyFormModal({ job, open, onClose }: { job: JobDetail
   const additional = job.status !== 'SURVEY_ASSIGNED';
   const [summary, setSummary] = useState('');
   const [estDays, setEstDays] = useState(1);
-  const [needRepair, setNeedRepair] = useState(additional);
+  // งานรีโนเวทส่วนใหญ่ต้องซ่อม จึงติ๊กไว้ก่อน (งานตรวจห้องเริ่มที่ไม่ติ๊ก)
+  const [needRepair, setNeedRepair] = useState(additional || job.jobType === 'RENOVATION');
   const [items, setItems] = useState<SurveyItem[]>(() =>
     job.jobType === 'INSPECTION' && !additional ? INSPECTION_TEMPLATE.map(([a, i]) => blank(a, i)) : [blank()]);
   const submit = useJobMutation(jobService.submitSurvey);
@@ -97,8 +98,12 @@ export default function SurveyFormModal({ job, open, onClose }: { job: JobDetail
             </label>
           )}
         </div>
-        {job.jobType === 'INSPECTION' && !additional && !needRepair && (
-          <p className="text-xs text-espresso-500">ไม่ติ๊ก "ต้องซ่อม" = ปิดงานตรวจห้องทันทีและแจ้งผลกลับระบบพาร์ทเนอร์</p>
+        {!additional && !needRepair && (
+          <p className="text-xs text-espresso-500">
+            {job.jobType === 'INSPECTION'
+              ? 'ไม่ติ๊ก "ต้องซ่อม" = ปิดงานตรวจห้องทันทีและแจ้งผลกลับระบบพาร์ทเนอร์'
+              : 'ไม่ติ๊ก "ต้องซ่อม" = จะไม่มีการทำสัญญา แอดมินจะปิดงานนี้'}
+          </p>
         )}
         <ErrorText error={submit.error} />
       </div>

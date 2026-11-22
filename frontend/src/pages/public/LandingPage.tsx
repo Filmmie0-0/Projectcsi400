@@ -14,8 +14,8 @@ const STEPS = [
 export default function LandingPage() {
   return (
     <div className="space-y-12">
-      <section className="grid items-center gap-8 lg:grid-cols-2">
-        <div>
+      <section>
+        <div className="max-w-2xl">
           <p className="text-sm font-medium text-walnut-600">Inspection & Renovation Service</p>
           <h1 className="mt-2 text-4xl font-semibold leading-tight text-espresso-900">
             ตรวจสอบห้องเช่า & รีโนเวทพื้นที่<br />เชื่อมกับระบบจองห้องพักของคุณ
@@ -29,19 +29,6 @@ export default function LandingPage() {
             <Link to="/sandbox" className="rounded-lg bg-sand-200 px-5 py-2.5 text-sm font-medium text-espresso-900 hover:bg-sand-300">ลองส่งงานแบบพาร์ทเนอร์</Link>
           </div>
         </div>
-        <Card className="space-y-3 bg-cream-100">
-          <p className="text-sm font-semibold text-espresso-900">3 บทบาทในระบบ</p>
-          {[
-            ['แอดมิน', 'รับงาน มอบหมายช่าง ทำสัญญา อนุมัติเบิกวัสดุ ตรวจสลิป'],
-            ['ลูกค้า', 'เจ้าของตึก/หอ หรือบัญชีระบบพาร์ทเนอร์ — แจ้งงาน เซ็นสัญญา ชำระเงิน'],
-            ['ช่าง', 'ประเมินหน้างาน บันทึกงานรายวัน เบิก/คืนวัสดุ'],
-          ].map(([role, text]) => (
-            <div key={role} className="rounded-lg bg-white p-3 text-sm">
-              <span className="font-medium text-walnut-700">{role}</span>
-              <span className="text-espresso-500"> — {text}</span>
-            </div>
-          ))}
-        </Card>
       </section>
 
       <section>

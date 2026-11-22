@@ -12,6 +12,7 @@ import { BILLING_TYPE } from '../../constants/labels';
 import { useContracts, useInvoices, useJobMutation } from '../../hooks/useJobs';
 import { jobService } from '../../services/jobService';
 import { useAuthStore } from '../../store/authStore';
+import { promptDialog } from '../../store/dialogStore';
 import { formatCurrency } from '../../utils/formatCurrency';
 import { formatDate } from '../../utils/formatDate';
 import type { Invoice } from '../../types/job';
@@ -87,9 +88,14 @@ function InvoiceRow({ invoice: v, role }: { invoice: Invoice; role: string }) {
       <Td className="whitespace-nowrap">
         {role === 'USER' && v.status === 'UNPAID' && (
           <Button
-            onClick={() => {
-              const slip = window.prompt('เลขอ้างอิงการโอน หรือลิงก์รูปสลิป');
-              if (slip?.trim()) pay.mutate([v.invoiceId, slip]);
+            onClick={async () => {
+              const slip = await promptDialog({
+                title: 'แจ้งชำระ',
+                message: `${v.description} · ${formatCurrency(v.amount)}`,
+                input: { label: 'เลขอ้างอิงการโอน หรือลิงก์รูปสลิป', required: true },
+                confirmText: 'ส่งแจ้งชำระ',
+              });
+              if (slip) pay.mutate([v.invoiceId, slip]);
             }}
           >
             แจ้งชำระ

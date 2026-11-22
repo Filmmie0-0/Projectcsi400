@@ -5,6 +5,7 @@ import StatusBadge from '../../common/StatusBadge';
 import { ErrorText } from '../../common/QueryState';
 import { useInventoryMutation } from '../../../hooks/useInventory';
 import { inventoryService } from '../../../services/inventoryService';
+import { promptDialog } from '../../../store/dialogStore';
 import { formatDateTime } from '../../../utils/formatDate';
 import type { Requisition } from '../../../types/inventory';
 import type { Role } from '../../../types/user';
@@ -70,8 +71,8 @@ export default function RequisitionCard({ req, role, userId }: { req: Requisitio
             </Button>
             <Button
               variant="ghost"
-              onClick={() => {
-                const reason = window.prompt('เหตุผลที่ไม่อนุมัติ');
+              onClick={async () => {
+                const reason = await promptDialog({ title: 'ไม่อนุมัติใบเบิก', input: { label: 'เหตุผลที่ไม่อนุมัติ' }, confirmText: 'ไม่อนุมัติ', danger: true });
                 if (reason !== null) reject.mutate([req.requisitionId, reason]);
               }}
             >

@@ -112,6 +112,18 @@ export interface Invoice {
   jobTitle?: string;
 }
 
+// CONTRACT = ไฟล์สัญญาที่แอดมินแนบส่งให้ลูกค้า, SIGNED = รูปสัญญาที่ลูกค้าเซ็นแล้วส่งกลับ
+export interface ContractFile {
+  fileId: number;
+  contractId: number;
+  kind: 'CONTRACT' | 'SIGNED';
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  uploadedBy: number;
+  createdAt: string;
+}
+
 export interface Contract {
   contractId: number;
   contractNo: string;
@@ -133,6 +145,7 @@ export interface Contract {
   rejectReason: string | null;
   createdAt: string;
   items?: ContractItem[];
+  files?: ContractFile[];
   invoices?: Invoice[];
   // จาก GET /contracts
   jobCode?: string;
@@ -171,6 +184,21 @@ export interface StatusLog {
   createdAt: string;
 }
 
+// STRUCTURAL = งานเปลี่ยนแปลงตัวอาคาร ต้องให้เจ้าของหออนุมัติก่อนส่งสัญญา/เริ่มงาน
+export type WorkScope = 'INTERIOR' | 'STRUCTURAL';
+export type OwnerApproval = 'NOT_REQUIRED' | 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface OwnerContact {
+  ownerName: string | null;
+  ownerPhone: string | null;
+  ownerEmail: string | null;
+  source: 'PAYLOAD' | 'PARTNER_API' | 'MANUAL' | null;
+  fetchError: string | null;
+  fetchedAt: string | null;
+  decidedAt: string | null;
+  decisionNote: string | null;
+}
+
 export interface JobDetail {
   jobId: number;
   jobCode: string;
@@ -186,6 +214,9 @@ export interface JobDetail {
   preferredDate: string | null;
   contactName: string | null;
   contactPhone: string | null;
+  workScope: WorkScope;
+  ownerApproval: OwnerApproval;
+  ownerContact: OwnerContact | null;
   status: JobStatus;
   completedAt: string | null;
   createdAt: string;

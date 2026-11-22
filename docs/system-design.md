@@ -71,7 +71,7 @@ DormBook (API key)┴─▶ Gateway :3000  ── ตรวจ session ผ่า
                          │        └── /internal/users/:id ─▶ auth-service (ตรวจว่าเป็นช่าง + snapshot ชื่อ)
                          └─▶ inventory-service :4003 ─▶ inventory_db  materials, stock_movements, requisitions
 job-service ──webhook (HMAC-SHA256)──▶ DormBook
-```
+``` 
 
 ทำไมเหลือ 3 service (เดิม 4): แบ่งตามสิ่งที่ dev 2 คนรับผิดชอบได้จริง และแต่ละ service มีข้อมูลของตัวเองชัดเจน
 - ข้าม database เก็บแค่ id + snapshot (เช่น `technician_name`, `job_code`) ไม่มี FK ข้าม DB

@@ -11,7 +11,8 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 const AUTH = process.env.AUTH_SERVICE_URL ?? 'http://localhost:4001';
 const JOB = process.env.JOB_SERVICE_URL ?? 'http://localhost:4002';
 const INVENTORY = process.env.INVENTORY_SERVICE_URL ?? 'http://localhost:4003';
-const CORS_ORIGIN = process.env.CORS_ORIGIN ?? 'http://localhost:5173';
+// ใส่ได้หลาย origin คั่นด้วย , เช่น http://localhost:5173,http://localhost:5180 (ต้องตรงทุกตัวอักษร)
+const CORS_ORIGINS = (process.env.CORS_ORIGIN ?? 'http://localhost:5173').split(',').map((s) => s.trim()).filter(Boolean);
 const COOKIE_NAME = 'renocare_access_token';
 const MOCK_PARTNER_SECRET = process.env.MOCK_PARTNER_WEBHOOK_SECRET ?? 'whsec_dormbook_demo';
 
@@ -44,7 +45,9 @@ const registerLimiter = rateLimit({
 });
 
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', CORS_ORIGIN);
+  const reqOrigin = req.get('origin');
+  res.setHeader('Access-Control-Allow-Origin', CORS_ORIGINS.includes(reqOrigin) ? reqOrigin : CORS_ORIGINS[0]);
+  res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-API-Key');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
@@ -107,7 +110,7 @@ app.use('/api', async (req, res, next) => {
   const path = req.originalUrl.split('?')[0];
   // กัน CSRF: คำขอที่เปลี่ยนข้อมูลจากเบราว์เซอร์ต้องมาจาก origin ของ frontend เท่านั้น
   const origin = req.get('origin');
-  if (!['GET', 'HEAD'].includes(req.method) && origin && origin !== CORS_ORIGIN) {
+  if (!['GET', 'HEAD'].includes(req.method) && origin && !CORS_ORIGINS.includes(origin)) {
     return res.status(403).json({ code: 'ORIGIN_NOT_ALLOWED', message: 'Origin is not allowed' });
   }
   if ((req.method === 'POST' && PUBLIC_POST.includes(path)) || (req.method === 'GET' && PUBLIC_GET.includes(path)) ||

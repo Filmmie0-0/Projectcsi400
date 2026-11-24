@@ -26,16 +26,18 @@ npm run dev        # http://localhost:5173
 
 `backend/.env.example` มี `AUTH_JWT_SECRET` สำหรับเครื่อง dev — ใช้จริงให้สร้างใหม่
 (`node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"`), ตั้ง `CORS_ORIGIN` ให้ตรงกับ origin ของ frontend
+(ใส่ได้หลายค่าคั่นด้วย `,` เช่น `http://localhost:5173,http://localhost:5180` — แก้แล้วต้อง `npm run stack:up` ใหม่)
 และบน production ใช้ HTTPS + `NODE_ENV=production` เพื่อเปิด Secure cookie
 
-บัญชีเดโม (รหัสผ่าน `password123`, มีปุ่มลัดในหน้า login)
+### บัญชีทดสอบ
 
-| บัญชี | Role |
-| --- | --- |
-| admin@renocare.local | ADMIN |
-| owner@renocare.local | USER (เจ้าของหอ) |
-| partner@dormbook.local | USER (บัญชีตัวแทนระบบจอง DormBook) |
-| tech1@renocare.local, tech2@renocare.local | TECHNICIAN |
+| Email | Password | Role |
+| --- | --- | --- |
+| admin@renocare.local | password123 | ADMIN |
+| owner@renocare.local | password123 | USER (เจ้าของหอ) |
+| partner@dormbook.local | password123 | USER (บัญชีตัวแทนระบบจอง DormBook) |
+| tech1@renocare.local | password123 | TECHNICIAN (ช่างเอก — ก่อ ฉาบ ปูกระเบื้อง ทาสี) |
+| tech2@renocare.local | password123 | TECHNICIAN (ช่างบี — ไฟฟ้า ประปา แอร์) |
 
 Partner API key เดโม: `dbk_live_demo_7f3a9c2e1b` — ลองได้ที่หน้า `/sandbox` (จำลองระบบจองห้องพักของเพื่อน รับ webhook จริง)
 

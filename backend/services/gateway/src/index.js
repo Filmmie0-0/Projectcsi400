@@ -157,5 +157,14 @@ for (const { prefixes, target } of routes) {
 
 app.use('/api', (_req, res) => res.status(404).json({ code: 'NOT_FOUND', message: 'No service for this path' }));
 
+// โหมดพกพา (portable/): gateway เสิร์ฟหน้าเว็บที่ build แล้วเอง ไม่ต้องรัน Vite
+// ทุก path ที่ไม่ใช่ไฟล์ → index.html ให้ React Router จัดการ (ชุด Docker ไม่ได้ตั้ง STATIC_DIR จึงไม่มีผล)
+if (process.env.STATIC_DIR) {
+  const { default: path } = await import('node:path');
+  const dir = path.resolve(process.env.STATIC_DIR);
+  app.use(express.static(dir, { index: false, maxAge: '1h' }));
+  app.get('/{*splat}', (_req, res) => res.sendFile(path.join(dir, 'index.html')));
+}
+
 const port = Number(process.env.PORT ?? 3000);
 app.listen(port, () => console.log(`gateway listening on :${port}`));

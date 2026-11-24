@@ -1,0 +1,21 @@
+# ใช้คู่กับ docker-compose.yml ตอนรันจากแฟลชไดร์ฟ (START-RenoCare.bat)
+# - ชื่อ container/volume แยกจากชุดพัฒนา (renocare_usb_*) เครื่องที่มีโปรเจกต์อยู่แล้วข้อมูลจะไม่ทับกัน
+# - gateway เสิร์ฟหน้าเว็บที่ build แล้ว (โฟลเดอร์ web/ บนแฟลชไดร์ฟ) ไม่ต้องมี Node/Vite ในเครื่อง
+services:
+  db:
+    image: renocare_usb_db:latest
+    container_name: renocare_usb_db
+  phpmyadmin:
+    container_name: renocare_usb_phpmyadmin
+  auth-service:
+    container_name: renocare_usb_auth_service
+  job-service:
+    container_name: renocare_usb_job_service
+  inventory-service:
+    container_name: renocare_usb_inventory_service
+  gateway:
+    container_name: renocare_usb_gateway
+    environment:
+      STATIC_DIR: /app/web
+    volumes:
+      - ../web:/app/web:ro

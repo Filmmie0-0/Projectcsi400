@@ -3,3 +3,6 @@ dist
 .vite
 .env
 *.tsbuildinfo
+
+# ชุดแฟลชไดร์ฟ (portable/build-docker.mjs): ไฟล์ที่ build แล้ว ไม่เก็บใน git
+portable/dist/

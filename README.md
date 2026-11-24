@@ -86,6 +86,45 @@ partner (API key)┴─> gateway :3000 ──┬─> auth-service      :4001 ─
 - compose ใช้ชื่อ project `renocare` จึงได้ volume ใหม่ `renocare_mysql_data`; volume ของระบบเดิม (`projectcsi400_mysql_data`) ไม่ได้ใช้แล้ว ลบได้ด้วย `docker volume rm projectcsi400_mysql_data`
 - พอร์ต 3306 ชนกับ MySQL ในเครื่อง → ตั้ง `DB_PORT=3307` ใน `backend/.env`
 
+## เอาไปเปิดเครื่องอื่นด้วยแฟลชไดร์ฟ (Docker + ข้อมูลจริง)
+
+ใช้เปิดทั้งระบบบนเครื่อง Windows อื่นที่มี Docker Desktop โดยใช้ข้อมูลชุดเดียวกับเครื่องนี้ ข้อมูลที่แก้ในเครื่องนั้นจะบันทึกกลับลงแฟลชไดร์ฟ
+
+### 1. ที่เครื่องนี้: ลงแฟลชไดร์ฟ
+
+```bash
+cd backend && npm run stack:up     # Docker ต้องรันอยู่ (ใช้ดึงข้อมูลจริง)
+cd .. && node portable/build-docker.mjs
+```
+
+แล้วคัดลอกโฟลเดอร์ `portable/dist/RenoCare-Docker` **ทั้งโฟลเดอร์**ลงแฟลชไดร์ฟ (ประมาณ 3 MB ในนั้นมีโค้ด หน้าเว็บที่ build แล้ว และข้อมูลจริงใน `data/*.sql`)
+
+### 2. ที่เครื่องอื่น: เปิดใช้
+
+ครั้งแรกในเครื่องนั้น: ติดตั้ง **Docker Desktop** และต่ออินเทอร์เน็ต (Docker ต้องโหลด image mysql/node)
+
+1. เปิด Docker Desktop รอจนขึ้น **Engine running**
+2. ดับเบิลคลิก **`START-RenoCare.bat`** ในแฟลชไดร์ฟ ระบบจะสร้าง container แล้วนำข้อมูลจากแฟลชไดร์ฟเข้า Docker
+   (ครั้งแรกใช้เวลาหลายนาที ถ้า Windows เตือน กด More info → Run anyway)
+3. เบราว์เซอร์เปิด **http://localhost:3090** ให้เอง แล้ว login ด้วยบัญชีทดสอบด้านบน
+
+### 3. ใช้เสร็จ: ก่อนถอดแฟลชไดร์ฟ
+
+ดับเบิลคลิก **`STOP-RenoCare.bat`** แล้วรอจนขึ้น "ปิดเรียบร้อย ถอดแฟลชไดร์ฟได้" ขั้นนี้บันทึกข้อมูลกลับลงแฟลชไดร์ฟแล้วปิด container
+**ถ้าไม่กด STOP สิ่งที่ทำในเครื่องนั้นจะไม่ติดมากับแฟลชไดร์ฟ** (`SAVE-data.bat` ใช้บันทึกระหว่างใช้งานโดยไม่ปิดระบบ)
+
+ใช้หลายเครื่อง: เครื่อง A START → ใช้ → **STOP** → ถอด → เครื่อง B START → ใช้ → **STOP**
+
+### ข้อควรรู้
+
+- `data/STAMP.txt` คือรหัสชุดข้อมูล START จะนำข้อมูลจากแฟลชไดร์ฟเข้า Docker เฉพาะเมื่อรหัสไม่ตรงกับที่อยู่ในเครื่อง เปิดซ้ำในเครื่องเดิมจึงไม่ทับข้อมูลในเครื่อง
+- แยกจากชุดพัฒนา: container ชื่อ `renocare_usb_*` พอร์ต 3090 (เว็บ) / 3316 (MySQL) / 8091 (phpMyAdmin, root/root) เปิดพร้อม `npm run stack:up` ได้ ข้อมูลไม่ทับกัน
+- ข้อมูลบนแฟลชไดร์ฟไม่ไหลกลับเข้าชุดพัฒนา (พอร์ต 3000) เอง และการ build ใหม่ด้วย `build-docker.mjs` จะ**ทับ**ข้อมูลในแฟลชไดร์ฟด้วยข้อมูลของเครื่องนี้
+- ต้องเข้าเว็บที่ `http://localhost:3090` เท่านั้น (`127.0.0.1` จะ login ไม่ได้ เพราะ CORS/CSRF ผูกกับ origin นี้)
+- `port is already allocated` = มีโปรแกรมอื่นใช้พอร์ต 3090/3316/8091 อยู่
+- ล้างทุกอย่างของชุดนี้ในเครื่องนั้น: `docker compose -p renocare_usb down -v` (ข้อมูลในแฟลชไดร์ฟยังอยู่)
+- สคริปต์ต้นฉบับอยู่ที่ `portable/docker/` (START/SAVE/STOP, `usb.sh` สำหรับ dump/restore ใน container, `docker-compose.usb.yml`)
+
 ## โครงสร้าง
 
 - `backend/database/services/` — schema + ข้อมูลเดโมแยกตาม service (`01_auth_db`, `02_job_db`, `03_inventory_db`)

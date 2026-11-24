@@ -62,6 +62,7 @@ partner (API key)┴─> gateway :3000 ──┬─> auth-service      :4001 ─
 ### Authentication
 
 - JWT (HS256, 8 ชม.) อยู่ใน `HttpOnly`, `SameSite=Strict` cookie; production เปิด `Secure`
+- เปิดใช้งานหลายแท็บในเบราว์เซอร์เดียวกันได้ โดยสถานะเข้าสู่ระบบและออกจากระบบจะซิงก์ข้ามแท็บ
 - gateway ตรวจ token กับ auth-service ทุก request (ลายเซ็น + บัญชี ACTIVE + `token_version`) แล้วส่ง `X-User-Id / X-User-Role / X-User-Name` ให้ service — header ที่ client ส่งมาเองถูกลบทิ้ง
 - logout หรือแอดมินระงับบัญชี → เพิ่ม `users.token_version` → token เดิมใช้ไม่ได้ทันที
 - request ที่เปลี่ยนข้อมูลจากเบราว์เซอร์ต้องมี Origin ตรงกับ `CORS_ORIGIN` (กัน CSRF)

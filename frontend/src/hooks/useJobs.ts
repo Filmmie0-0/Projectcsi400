@@ -5,6 +5,7 @@ import type { JobDetail } from '../types/job';
 export const jobKeys = {
   all: ['jobs'] as const,
   list: (params?: object) => ['jobs', 'list', params ?? {}] as const,
+  partnerInbox: ['jobs', 'partner-inbox'] as const,
   detail: (id: number) => ['jobs', 'detail', id] as const,
   buildings: ['jobs', 'buildings'] as const,
   contracts: ['jobs', 'contracts'] as const,
@@ -14,6 +15,12 @@ export const jobKeys = {
 
 export const useJobs = (params?: { status?: string; type?: string }) =>
   useQuery({ queryKey: jobKeys.list(params), queryFn: () => jobService.listJobs(params) });
+export const usePartnerInboxJobs = () =>
+  useQuery({
+    queryKey: jobKeys.partnerInbox,
+    queryFn: () => jobService.listJobs({ source: 'PARTNER' }),
+    refetchInterval: 5000,
+  });
 export const useJob = (id: number) =>
   useQuery({ queryKey: jobKeys.detail(id), queryFn: () => jobService.getJob(id), enabled: id > 0 });
 export const useBuildings = () => useQuery({ queryKey: jobKeys.buildings, queryFn: jobService.listBuildings });

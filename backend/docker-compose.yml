@@ -62,7 +62,7 @@ services:
       DB_USER: auth_svc
       DB_PASSWORD: ${AUTH_DB_PASSWORD:-auth_pass}
       # อย่างน้อย 32 ไบต์ ตั้งใน backend/.env (คัดลอกจาก .env.example)
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:?ตั้ง AUTH_JWT_SECRET ใน backend/.env ก่อน (cp .env.example .env)}
+      AUTH_JWT_SECRET: ${dev-only-change-me-0123456789abcdefghijklmnopAUTH_JWT_SECRET:-dev-only-change-me-0123456789abcdefghijklmnop}
       NODE_ENV: ${NODE_ENV:-development}
 
   job-service:

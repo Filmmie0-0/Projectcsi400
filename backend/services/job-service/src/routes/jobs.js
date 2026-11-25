@@ -39,6 +39,17 @@ router.get('/api/jobs', async (req, res) => {
   }
   if (req.query.status) { where.push('j.status = ?'); params.push(req.query.status); }
   if (req.query.type) { where.push('j.job_type = ?'); params.push(req.query.type); }
+  if (req.query.source) {
+    if (!['DIRECT', 'PARTNER'].includes(req.query.source)) {
+      throw new HttpError(422, 'VALIDATION', 'source must be DIRECT or PARTNER');
+    }
+    where.push('j.source = ?');
+    params.push(req.query.source);
+  }
+  const orderBy = req.query.source === 'PARTNER'
+    ? 'j.created_at DESC'
+    : "FIELD(j.status, 'COMPLETED', 'CANCELLED'), j.priority = 'URGENT' DESC, j.created_at DESC";
+  const limit = req.query.source === 'PARTNER' ? 'LIMIT 50' : '';
   const [rows] = await pool.query(
     `SELECT j.job_id, j.job_code, j.job_type, j.source, j.title, j.priority, j.status, j.preferred_date, j.created_at,
             j.work_scope, j.owner_approval,
@@ -49,7 +60,7 @@ router.get('/api/jobs', async (req, res) => {
      FROM jobs j JOIN units u ON u.unit_id = j.unit_id JOIN buildings b ON b.building_id = u.building_id
      LEFT JOIN partners p ON p.partner_id = j.partner_id
      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-     ORDER BY FIELD(j.status, 'COMPLETED', 'CANCELLED'), j.priority = 'URGENT' DESC, j.created_at DESC`,
+     ORDER BY ${orderBy} ${limit}`,
     params,
   );
   res.json(rows.map(camel));

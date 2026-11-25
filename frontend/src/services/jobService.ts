@@ -7,7 +7,8 @@ import type {
 export const jobService = {
   listBuildings: () => data(apiClient.get<Building[]>('/buildings')),
 
-  listJobs: (params?: { status?: string; type?: string }) => data(apiClient.get<JobListItem[]>('/jobs', { params })),
+  listJobs: (params?: { status?: string; type?: string; source?: 'DIRECT' | 'PARTNER' }) =>
+    data(apiClient.get<JobListItem[]>('/jobs', { params })),
   getJob: (id: number) => data(apiClient.get<JobDetail>(`/jobs/${id}`)),
   assign: (id: number, body: { technicianIds: number[]; leadId: number; scheduledDate?: string }) =>
     data(apiClient.post<JobDetail>(`/jobs/${id}/assign`, body)),

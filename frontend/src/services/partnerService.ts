@@ -7,8 +7,10 @@ export const partnerService = {
   list: () => data(apiClient.get<Partner[]>('/partners')),
   create: (body: { name: string; ownerUserId: number; webhookUrl?: string }) =>
     data(apiClient.post<{ partnerId: number; apiKey: string; webhookSecret: string }>('/partners', body)),
-  update: (id: number, body: { webhookUrl?: string; isActive?: boolean }) => data(apiClient.patch(`/partners/${id}`, body)),
+  update: (id: number, body: { webhookUrl?: string; isActive?: boolean; apiBaseUrl?: string; outboundApiKey?: string; buildingRef?: string }) =>
+    data(apiClient.patch(`/partners/${id}`, body)),
   rotateKey: (id: number) => data(apiClient.post<{ apiKey: string }>(`/partners/${id}/rotate-key`)),
+  rotateSecret: (id: number) => data(apiClient.post<{ webhookSecret: string }>(`/partners/${id}/rotate-secret`)),
   deliveries: (id: number) => data(apiClient.get<WebhookDelivery[]>(`/partners/${id}/deliveries`)),
   retryDelivery: (deliveryId: number) => data(apiClient.post(`/partners/deliveries/${deliveryId}/retry`)),
 };

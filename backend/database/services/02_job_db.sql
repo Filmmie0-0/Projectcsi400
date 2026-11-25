@@ -20,6 +20,7 @@ CREATE TABLE partners (
   webhook_secret  VARCHAR(64) NOT NULL,
   api_base_url    VARCHAR(500) NULL,
   outbound_api_key VARCHAR(100) NULL,
+  building_ref    VARCHAR(40) NULL,   -- รหัสอาคารฝั่งหอพัก (ใช้กับ webhook /dorm-webhook และ /buildings/{ref}/owner)
   is_active       TINYINT(1) NOT NULL DEFAULT 1,
   created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (partner_id),
@@ -295,7 +296,7 @@ CREATE TABLE webhook_deliveries (
   job_id           BIGINT UNSIGNED NULL,
   event            VARCHAR(50) NOT NULL,
   payload          JSON NOT NULL,
-  status           ENUM('PENDING','SENT','FAILED') NOT NULL DEFAULT 'PENDING',
+  status           ENUM('PENDING','SENT','FAILED','SKIPPED') NOT NULL DEFAULT 'PENDING',  -- SKIPPED = event ที่พาร์ทเนอร์ไม่ใช้
   attempts         TINYINT UNSIGNED NOT NULL DEFAULT 0,
   last_error       VARCHAR(500) NULL,
   next_attempt_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -388,30 +389,30 @@ INSERT INTO partners (partner_id, name, owner_user_id, api_key_prefix, api_key_h
    'http://gateway:3000/mock-partner/api', 'rnc_out_demo_4b8d2f');
 
 INSERT INTO buildings (building_id, owner_user_id, partner_id, external_ref, name, address) VALUES
-  (1, 2, NULL, NULL,         'หอพักสุขใจ แมนชั่น',      'ซ.พหลโยธิน 32 แขวงจันทรเกษม เขตจตุจักร กรุงเทพฯ'),
+  (1, 3, 1,    'DB-BLD-002', 'หอพักสุขใจ แมนชั่น',      'ซ.พหลโยธิน 32 แขวงจันทรเกษม เขตจตุจักร กรุงเทพฯ'),
   (2, 3, 1,    'DB-BLD-001', 'บ้านริมคลอง เรสซิเดนซ์', 'ถ.พหลโยธิน กม.42 อ.คลองหลวง จ.ปทุมธานี');
 
 INSERT INTO units (unit_id, building_id, unit_type, code, floor, size_sqm, external_ref) VALUES
-  (1, 1, 'ROOM',           '305',     '3', 24.00, NULL),
-  (2, 1, 'UNDER_BUILDING', 'G-01',    'G', 40.00, NULL),
+  (1, 1, 'ROOM',           '305',     '3', 24.00, 'DB-RM-305'),
+  (2, 1, 'UNDER_BUILDING', 'G-01',    'G', 40.00, 'DB-AREA-G01'),
   (3, 2, 'ROOM',           '201',     '2', 22.00, 'DB-RM-201'),
   (4, 2, 'ROOM',           '202',     '2', 22.00, 'DB-RM-202'),
   (5, 2, 'UNDER_BUILDING', 'G-LOBBY', 'G', 60.00, 'DB-AREA-G');
 
 INSERT INTO jobs (job_id, job_code, job_type, source, partner_id, external_ref, unit_id, requester_id, title, description,
                   priority, preferred_date, contact_name, contact_phone, status, created_at) VALUES
-  (1, 'JB2609-0001', 'RENOVATION', 'DIRECT', NULL, NULL, 2, 2,
+  (1, 'JB2609-0001', 'RENOVATION', 'PARTNER', 1, 'DB-REQ-5402', 2, 3,
    'รีโนเวทพื้นที่ใต้ตึกเป็นร้านกาแฟ', 'ทำพื้นกระเบื้องใหม่ ทาสี เดินไฟใหม่ ติดโคม LED', 'NORMAL', '2026-09-25',
-   'สมหญิง', '0811111111', 'IN_PROGRESS', '2026-09-20 10:00:00'),
+   'คุณนิด (DormBook)', '0822222222', 'IN_PROGRESS', '2026-09-20 10:00:00'),
   (2, 'JB2610-0002', 'INSPECTION', 'PARTNER', 1, 'BK-88231-OUT', 3, 3,
    'ตรวจห้องหลังผู้เช่าย้ายออก ห้อง 201', 'ผู้เช่าแจ้งย้ายออก 20 ต.ค. ตรวจสภาพก่อนคืนเงินประกัน', 'URGENT', '2026-10-21',
    'คุณนิด (DormBook)', '0822222222', 'QUOTED', '2026-10-20 09:15:00'),
   (3, 'JB2610-0003', 'INSPECTION', 'PARTNER', 1, 'BK-88310-OUT', 4, 3,
    'ตรวจห้องหลังผู้เช่าย้ายออก ห้อง 202', 'ย้ายออก 31 ต.ค.', 'NORMAL', '2026-10-31',
    'คุณนิด (DormBook)', '0822222222', 'NEW', '2026-10-26 14:30:00'),
-  (4, 'JB2610-0004', 'RENOVATION', 'DIRECT', NULL, NULL, 1, 2,
+  (4, 'JB2610-0004', 'RENOVATION', 'PARTNER', 1, 'DB-REQ-5510', 1, 3,
    'ทาสีใหม่ + เปลี่ยนพื้นห้อง 305', 'ห้องเก่า ผนังมีคราบ พื้นลามิเนตบวม', 'LOW', '2026-11-02',
-   'สมหญิง', '0811111111', 'SURVEY_ASSIGNED', '2026-10-25 11:00:00');
+   'คุณนิด (DormBook)', '0822222222', 'SURVEY_ASSIGNED', '2026-10-25 11:00:00');
 
 -- งานโครงสร้างจาก DormBook: ปรับพื้นที่ใต้ตึกเป็นร้านโชว์ห่วย รอเจ้าของหออนุมัติ
 INSERT INTO jobs (job_id, job_code, job_type, source, partner_id, external_ref, unit_id, requester_id, title, description,
@@ -462,7 +463,7 @@ INSERT INTO contract_items (contract_id, material_id, description, qty, unit, un
   (2, 10, 'ซิลิโคนยาแนว',               2,  'หลอด', 110),
   (2, 11, 'ก๊อกอ่างล้างหน้า',           1,  'ชุด', 500);
 
-UPDATE contracts SET status = 'SIGNED', sent_at = '2026-09-24 11:00:00', signed_by = 2, signed_name = 'สมหญิง เจ้าของหอ',
+UPDATE contracts SET status = 'SIGNED', sent_at = '2026-09-24 11:00:00', signed_by = 3, signed_name = 'คุณนิด (DormBook)',
                      signed_at = '2026-09-25 09:00:00' WHERE contract_id = 1;
 UPDATE contracts SET status = 'SENT', sent_at = '2026-10-22 09:30:00' WHERE contract_id = 2;
 
@@ -479,17 +480,17 @@ INSERT INTO work_logs (job_id, technician_id, technician_name, work_date, hours,
 -- ประวัติสถานะที่ trigger สร้างตอน seed ไม่ตรงกับเหตุการณ์จริง จึงใส่ประวัติเดโมแทน
 DELETE FROM job_status_logs;
 INSERT INTO job_status_logs (job_id, from_status, to_status, changed_by, remark, created_at) VALUES
-  (1, NULL,              'NEW',             2,    NULL,                    '2026-09-20 10:00:00'),
+  (1, NULL,              'NEW',             NULL, 'รับงานจาก DormBook',    '2026-09-20 10:00:00'),
   (1, 'NEW',             'SURVEY_ASSIGNED', 1,    'นัดสำรวจ 23 ก.ย.',     '2026-09-21 09:00:00'),
   (1, 'SURVEY_ASSIGNED', 'SURVEYED',        4,    NULL,                    '2026-09-23 16:00:00'),
   (1, 'SURVEYED',        'QUOTED',          1,    'ส่งสัญญา CT2609-0001', '2026-09-24 11:00:00'),
-  (1, 'QUOTED',          'CONTRACTED',      2,    'เซ็นสัญญา CT2609-0001', '2026-09-25 09:00:00'),
+  (1, 'QUOTED',          'CONTRACTED',      3,    'เซ็นสัญญา CT2609-0001', '2026-09-25 09:00:00'),
   (1, 'CONTRACTED',      'IN_PROGRESS',     4,    NULL,                    '2026-10-01 08:00:00'),
   (2, NULL,              'NEW',             NULL, 'รับงานจาก DormBook',    '2026-10-20 09:15:00'),
   (2, 'NEW',             'SURVEY_ASSIGNED', 1,    NULL,                    '2026-10-20 10:00:00'),
   (2, 'SURVEY_ASSIGNED', 'SURVEYED',        5,    NULL,                    '2026-10-21 15:30:00'),
   (2, 'SURVEYED',        'QUOTED',          1,    'ส่งสัญญา CT2610-0002', '2026-10-22 09:30:00'),
   (3, NULL,              'NEW',             NULL, 'รับงานจาก DormBook',    '2026-10-26 14:30:00'),
-  (4, NULL,              'NEW',             2,    NULL,                    '2026-10-25 11:00:00'),
+  (4, NULL,              'NEW',             NULL, 'รับงานจาก DormBook',    '2026-10-25 11:00:00'),
   (4, 'NEW',             'SURVEY_ASSIGNED', 1,    'นัดสำรวจ 28 ต.ค.',     '2026-10-26 09:00:00'),
   (5, NULL,              'NEW',             NULL, 'รับงานจาก DormBook (งานโครงสร้าง รอเจ้าของหออนุมัติ)', '2026-10-30 13:00:00');

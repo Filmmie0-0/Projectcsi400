@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { pool, tx, nextCode } from '../db.js';
+import { pool, tx } from '../db.js';
 import { HttpError, camel, currentUser, requireRole } from '../http.js';
 import {
   COMPANY_CONTACT, assertCanView, assertOwnerApproved, assertStatus, assignment, enqueueWebhook, getJobDetail, loadJob, moveStatus,
@@ -8,9 +8,6 @@ import {
 import { fetchOwnerContact } from '../partnerClient.js';
 
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL ?? 'http://localhost:4001';
-const JOB_TYPES = ['INSPECTION', 'RENOVATION'];
-export const WORK_SCOPES = ['INTERIOR', 'STRUCTURAL'];
-const UNIT_TYPES = ['ROOM', 'COMMON', 'UNDER_BUILDING'];
 const CONDITIONS = ['GOOD', 'FAIR', 'DAMAGED', 'MISSING'];
 const ACTIONS = ['NONE', 'REPAIR', 'REPLACE'];
 
@@ -29,36 +26,6 @@ router.get('/api/buildings', requireRole('ADMIN', 'USER'), async (req, res) => {
     units: units.filter((u) => u.building_id === b.building_id).map(camel),
   })));
 });
-
-router.post('/api/buildings', requireRole('USER'), async (req, res) => {
-  const { name, address, units = [] } = req.body;
-  if (!name?.trim() || !address?.trim()) throw new HttpError(422, 'VALIDATION', 'กรอกชื่อตึกและที่อยู่');
-  const id = await tx(currentUser(req).id, async (conn) => {
-    const [r] = await conn.query('INSERT INTO buildings (owner_user_id, name, address) VALUES (?, ?, ?)', [
-      currentUser(req).id, name.trim(), address.trim(),
-    ]);
-    for (const u of units) await insertUnit(conn, r.insertId, u);
-    return r.insertId;
-  });
-  res.status(201).json({ buildingId: id });
-});
-
-router.post('/api/buildings/:id/units', requireRole('USER'), async (req, res) => {
-  const [[b]] = await pool.query('SELECT * FROM buildings WHERE building_id = ? AND owner_user_id = ?', [
-    req.params.id, currentUser(req).id,
-  ]);
-  if (!b) throw new HttpError(404, 'NOT_FOUND', 'ไม่พบตึก');
-  const unitId = await insertUnit(pool, b.building_id, req.body);
-  res.status(201).json({ unitId });
-});
-
-async function insertUnit(conn, buildingId, { unitType = 'ROOM', code, floor, sizeSqm }) {
-  if (!code?.trim() || !UNIT_TYPES.includes(unitType)) throw new HttpError(422, 'VALIDATION', 'ข้อมูลห้อง/พื้นที่ไม่ถูกต้อง');
-  const [r] = await conn.query('INSERT INTO units (building_id, unit_type, code, floor, size_sqm) VALUES (?, ?, ?, ?, ?)', [
-    buildingId, unitType, code.trim(), floor || null, sizeSqm || null,
-  ]);
-  return r.insertId;
-}
 
 // ── งาน ──
 router.get('/api/jobs', async (req, res) => {
@@ -86,33 +53,6 @@ router.get('/api/jobs', async (req, res) => {
     params,
   );
   res.json(rows.map(camel));
-});
-
-router.post('/api/jobs', requireRole('USER'), async (req, res) => {
-  const user = currentUser(req);
-  const { unitId, jobType, title, description, priority = 'NORMAL', preferredDate, contactName, contactPhone, workScope = 'INTERIOR' } = req.body;
-  if (!JOB_TYPES.includes(jobType) || !title?.trim() || !WORK_SCOPES.includes(workScope)) {
-    throw new HttpError(422, 'VALIDATION', 'เลือกประเภทงานและกรอกหัวข้อ');
-  }
-  const [[unit]] = await pool.query(
-    'SELECT u.unit_id FROM units u JOIN buildings b ON b.building_id = u.building_id WHERE u.unit_id = ? AND b.owner_user_id = ?',
-    [unitId, user.id],
-  );
-  if (!unit) throw new HttpError(422, 'VALIDATION', 'ไม่พบห้อง/พื้นที่ของคุณ');
-  const job = await tx(user.id, async (conn) => {
-    const code = await nextCode(conn, 'jobs', 'job_code', 'JB');
-    const [r] = await conn.query(
-      `INSERT INTO jobs (job_code, job_type, unit_id, requester_id, title, description, priority, preferred_date, contact_name, contact_phone,
-                         work_scope, owner_approval)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [code, jobType, unitId, user.id, title.trim(), description ?? null, priority, preferredDate || null,
-       contactName || user.name, contactPhone ?? null,
-       // แจ้งงานตรงจากเจ้าของตึกเอง (ตรวจแล้วว่าเป็นเจ้าของห้องนี้) จึงถือว่าอนุมัติแล้ว
-       workScope, workScope === 'STRUCTURAL' ? 'APPROVED' : 'NOT_REQUIRED'],
-    );
-    return { jobId: r.insertId, jobCode: code };
-  });
-  res.status(201).json(job);
 });
 
 router.get('/api/jobs/:id', async (req, res) => {

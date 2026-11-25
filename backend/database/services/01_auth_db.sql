@@ -41,7 +41,6 @@ SELECT
 -- user_id 1-5 ถูกอ้างถึงใน job_db / inventory_db seed
 INSERT INTO users (user_id, email, password_hash, role, full_name, phone) VALUES
   (1, 'admin@renocare.local',   '$2a$10$SZ2Fnqt5c6rlXSZMwgXDie0QvNOz7i8Jx114DnehlcvyJ8qPDaSTy', 'ADMIN',      'แอดมิน รีโนแคร์',         '020000000'),
-  (2, 'owner@renocare.local',   '$2a$10$SZ2Fnqt5c6rlXSZMwgXDie0QvNOz7i8Jx114DnehlcvyJ8qPDaSTy', 'USER',       'สมหญิง เจ้าของหอ',        '0811111111'),
   (3, 'partner@dormbook.local', '$2a$10$SZ2Fnqt5c6rlXSZMwgXDie0QvNOz7i8Jx114DnehlcvyJ8qPDaSTy', 'USER',       'DormBook (ระบบจองห้องพัก)', '0822222222'),
   (4, 'tech1@renocare.local',   '$2a$10$SZ2Fnqt5c6rlXSZMwgXDie0QvNOz7i8Jx114DnehlcvyJ8qPDaSTy', 'TECHNICIAN', 'ช่างเอก งานโครงสร้าง',     '0833333333'),
   (5, 'tech2@renocare.local',   '$2a$10$SZ2Fnqt5c6rlXSZMwgXDie0QvNOz7i8Jx114DnehlcvyJ8qPDaSTy', 'TECHNICIAN', 'ช่างบี ไฟฟ้า-ประปา',       '0844444444');

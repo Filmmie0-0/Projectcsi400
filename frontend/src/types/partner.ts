@@ -6,6 +6,9 @@ export interface Partner {
   ownerUserId: number;
   apiKeyPrefix: string;
   webhookUrl: string | null;
+  apiBaseUrl: string | null;
+  buildingRef: string | null;
+  hasOutboundKey: number;
   isActive: number;
   createdAt: string;
   totalJobs: number;
@@ -17,7 +20,7 @@ export interface WebhookDelivery {
   jobId: number | null;
   event: string;
   payload: Record<string, unknown>;
-  status: 'PENDING' | 'SENT' | 'FAILED';
+  status: 'PENDING' | 'SENT' | 'FAILED' | 'SKIPPED';
   attempts: number;
   lastError: string | null;
   sentAt: string | null;

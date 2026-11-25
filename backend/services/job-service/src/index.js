@@ -8,7 +8,8 @@ import { startWebhookWorker } from './webhooks.js';
 
 const SERVICE = 'job-service';
 const app = express();
-app.use(express.json());
+// เก็บ body ดิบไว้ตรวจ X-Signature ของ webhook จากหอพัก (HMAC ต้องคำนวณจาก byte ที่ส่งมาจริง)
+app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 app.get('/health', async (_req, res) => {
   try {
@@ -39,6 +40,23 @@ app.get('/internal/summary', async (_req, res) => {
 });
 
 app.use(errorHandler);
+
+// DB ที่สร้างไว้ก่อนเพิ่ม partners.building_ref / webhook_deliveries.status = SKIPPED (init script รันเฉพาะตอนสร้าง volume ใหม่)
+async function ensureSchema() {
+  const [[col]] = await pool.query(
+    `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'partners' AND COLUMN_NAME = 'building_ref'`,
+  );
+  if (!col.n) await pool.query('ALTER TABLE partners ADD COLUMN building_ref VARCHAR(40) NULL AFTER outbound_api_key');
+  const [[wh]] = await pool.query(
+    `SELECT COLUMN_TYPE AS t FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'webhook_deliveries' AND COLUMN_NAME = 'status'`,
+  );
+  if (!wh.t.includes('SKIPPED')) {
+    await pool.query(`ALTER TABLE webhook_deliveries MODIFY status ENUM('PENDING','SENT','FAILED','SKIPPED') NOT NULL DEFAULT 'PENDING'`);
+  }
+}
+await ensureSchema();
 
 startWebhookWorker();
 

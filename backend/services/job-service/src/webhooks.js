@@ -8,11 +8,16 @@ const MAX_ATTEMPTS = 5;
 
 async function deliverPending() {
   const [rows] = await pool.query(
-    `SELECT w.delivery_id, w.payload, w.attempts, p.webhook_url, p.webhook_secret
+    `SELECT w.delivery_id, w.payload, w.attempts, p.webhook_url, p.webhook_secret, p.integration_mode
      FROM webhook_deliveries w JOIN partners p ON p.partner_id = w.partner_id
      WHERE w.status = 'PENDING' AND w.next_attempt_at <= NOW() ORDER BY w.delivery_id LIMIT 10`,
   );
   for (const d of rows) {
+    // พาร์ทเนอร์โหมด Repair API v1 ที่ไม่ได้ตั้ง webhook_url ฝั่งรับของตัวเองไม่ต้องส่งออกทาง outbox นี้
+    if (!d.webhook_url && d.integration_mode === 'REPAIR_API_V1') {
+      await pool.query('DELETE FROM webhook_deliveries WHERE delivery_id = ?', [d.delivery_id]);
+      continue;
+    }
     const body = typeof d.payload === 'string' ? d.payload : JSON.stringify(d.payload);
     try {
       if (!d.webhook_url) throw new Error('partner has no webhook_url');

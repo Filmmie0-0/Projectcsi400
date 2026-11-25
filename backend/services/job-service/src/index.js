@@ -1,9 +1,10 @@
 import express from 'express';
-import { pool } from './db.js';
+import { ensureSchema, pool } from './db.js';
 import { HttpError, errorHandler } from './http.js';
 import { router as jobRoutes } from './routes/jobs.js';
 import { router as contractRoutes } from './routes/contracts.js';
 import { router as partnerRoutes } from './routes/partners.js';
+import { startRepairSyncWorker } from './repairSync.js';
 import { startWebhookWorker } from './webhooks.js';
 
 const SERVICE = 'job-service';
@@ -40,7 +41,21 @@ app.get('/internal/summary', async (_req, res) => {
 
 app.use(errorHandler);
 
+async function initWithRetry(attempts = 10) {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      await ensureSchema();
+      return;
+    } catch (err) {
+      if (i === attempts) throw err;
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+  }
+}
+
+await initWithRetry();
 startWebhookWorker();
+startRepairSyncWorker();
 
 const port = Number(process.env.PORT ?? 4002);
 app.listen(port, () => console.log(`${SERVICE} listening on :${port}`));

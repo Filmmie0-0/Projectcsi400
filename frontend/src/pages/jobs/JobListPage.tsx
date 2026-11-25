@@ -1,12 +1,16 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus } from 'lucide-react';
+import { Plus, RefreshCw } from 'lucide-react';
 import PageHeader from '../../components/common/PageHeader';
 import QueryState from '../../components/common/QueryState';
+import Button from '../../components/ui/Button';
 import Select from '../../components/ui/Select';
 import JobTable from '../../components/features/job/JobTable';
 import { useJobs } from '../../hooks/useJobs';
+import { usePartnerMutation, usePartners } from '../../hooks/usePartners';
+import { partnerService } from '../../services/partnerService';
 import { useAuthStore } from '../../store/authStore';
+import { toast } from '../../store/toastStore';
 import { JOB_STATUS, JOB_TYPE, toOptions } from '../../constants/labels';
 
 const TITLE = { ADMIN: 'งานทั้งหมด', USER: 'งานของฉัน', TECHNICIAN: 'งานที่ได้รับมอบหมาย' } as const;
@@ -23,11 +27,13 @@ export default function JobListPage() {
       <PageHeader
         title={TITLE[role]}
         description="ทั้งงานที่แจ้งตรงและงานที่รับมาจากระบบจองห้องพักพาร์ทเนอร์"
-        action={role === 'USER' && (
-          <Link to="/user/jobs/new" className="inline-flex items-center gap-2 rounded-lg bg-walnut-500 px-4 py-2 text-sm font-medium text-cream-50 hover:bg-walnut-600">
-            <Plus className="h-4 w-4" /> แจ้งงานใหม่
-          </Link>
-        )}
+        action={
+          role === 'ADMIN' ? <SyncRepairPartnersButton /> : role === 'USER' ? (
+            <Link to="/user/jobs/new" className="inline-flex items-center gap-2 rounded-lg bg-walnut-500 px-4 py-2 text-sm font-medium text-cream-50 hover:bg-walnut-600">
+              <Plus className="h-4 w-4" /> แจ้งงานใหม่
+            </Link>
+          ) : undefined
+        }
       />
       <div className="mb-4 grid max-w-md grid-cols-2 gap-3">
         <Select value={status} onChange={(e) => setStatus(e.target.value)} options={toOptions(JOB_STATUS)} placeholder="ทุกสถานะ" />
@@ -37,5 +43,38 @@ export default function JobListPage() {
         <JobTable jobs={jobs.data ?? []} empty="ไม่พบงานตามเงื่อนไข" />
       </QueryState>
     </>
+  );
+}
+
+function SyncRepairPartnersButton() {
+  const partners = usePartners();
+  const sync = usePartnerMutation(partnerService.sync);
+  const [busy, setBusy] = useState(false);
+  const activeRepair = (partners.data ?? []).filter((p) => p.integrationMode === 'REPAIR_API_V1' && p.isActive && p.hasOutboundKey);
+  if (!activeRepair.length) return null;
+
+  const syncAll = async () => {
+    setBusy(true);
+    try {
+      let created = 0;
+      let updated = 0;
+      let cancelled = 0;
+      for (const p of activeRepair) {
+        const res = await sync.mutateAsync([p.partnerId]);
+        created += res.created;
+        updated += res.updated;
+        cancelled += res.cancelled;
+      }
+      toast.success(`ซิงค์หอพักแล้ว: ใหม่ ${created} · อัปเดต ${updated} · ยกเลิก ${cancelled}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Button variant="secondary" onClick={syncAll} disabled={busy}>
+      <RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} />
+      {busy ? 'กำลังซิงค์...' : 'ซิงค์งานหอพัก'}
+    </Button>
   );
 }

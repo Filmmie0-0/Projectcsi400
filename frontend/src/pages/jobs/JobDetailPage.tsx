@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, PlugZap } from 'lucide-react';
+import { ArrowLeft, PlugZap, RefreshCw } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
@@ -44,6 +44,7 @@ export default function JobDetailPage() {
               {user.role !== 'USER' && <JobRequisitionSection job={job.data} role={user.role} userId={user.userId} />}
             </div>
             <div className="space-y-6">
+              <RepairApiCard job={job.data} role={user.role} />
               <OwnerApprovalCard job={job.data} role={user.role} />
               <Actions job={job.data} />
               <InfoCard job={job.data} />
@@ -82,6 +83,12 @@ function Actions({ job }: { job: JobDetail }) {
   const isLead = job.assignments.some((a) => a.technicianId === user.userId && a.isLead);
   const isAdmin = user.role === 'ADMIN';
   const open = !['COMPLETED', 'CANCELLED'].includes(job.status);
+  const hasPendingContract = job.contracts.some((c) => ['DRAFT', 'SENT'].includes(c.status));
+  const canStart =
+    isLead &&
+    job.ownerApproval !== 'PENDING' &&
+    (job.status === 'CONTRACTED' || (Boolean(job.remoteJobId) && ['SURVEY_ASSIGNED', 'SURVEYED'].includes(job.status) && !hasPendingContract));
+  const isRejectableRemote = Boolean(job.remoteJobId && job.status === 'NEW' && job.remoteStatus === 'sent');
 
   const buttons = [
     isAdmin && open && (
@@ -89,13 +96,29 @@ function Actions({ job }: { job: JobDetail }) {
         {job.status === 'NEW' ? 'มอบหมายช่าง & นัดประเมิน' : 'ปรับทีมช่าง'}
       </Button>
     ),
-    isLead && job.status === 'CONTRACTED' && (
-      <Button key="start" onClick={() => start.mutate([job.jobId])} disabled={start.isPending}>เริ่มงาน</Button>
+    canStart && (
+      <Button key="start" onClick={() => start.mutate([job.jobId])} disabled={start.isPending}>
+        {job.remoteJobId && job.status !== 'CONTRACTED' ? 'เริ่มซ่อมงาน' : 'เริ่มงาน'}
+      </Button>
     ),
     isLead && job.status === 'IN_PROGRESS' && (
       <Button
         key="complete"
-        onClick={async () => (await confirmDialog({ title: 'ส่งมอบงาน / ปิดงาน?', message: `ยืนยันว่างาน ${job.jobCode} เสร็จเรียบร้อยและส่งมอบให้ลูกค้าแล้ว`, confirmText: 'ส่งมอบงาน' })) && complete.mutate([job.jobId])}
+        onClick={async () => {
+          if (job.remoteJobId) {
+            const note = await promptDialog({
+              title: 'ส่งมอบงาน / ปิดงานซ่อม?',
+              message: `ยืนยันว่างาน ${job.jobCode} เสร็จเรียบร้อยแล้ว (จะส่งสถานะ done ไปยังระบบหอพัก)`,
+              input: { label: 'บันทึกการซ่อมถึงหอพัก', placeholder: 'เช่น เติมน้ำยาและล้างท่อน้ำทิ้งแล้ว' },
+              confirmText: 'ปิดงานซ่อมเสร็จ',
+            });
+            if (note !== null) complete.mutate([job.jobId, note || undefined]);
+            return;
+          }
+          if (await confirmDialog({ title: 'ส่งมอบงาน / ปิดงาน?', message: `ยืนยันว่างาน ${job.jobCode} เสร็จเรียบร้อยและส่งมอบให้ลูกค้าแล้ว`, confirmText: 'ส่งมอบงาน' })) {
+            complete.mutate([job.jobId]);
+          }
+        }}
         disabled={complete.isPending}
       >
         ส่งมอบงาน / ปิดงาน
@@ -116,11 +139,21 @@ function Actions({ job }: { job: JobDetail }) {
         key="cancel"
         variant="ghost"
         onClick={async () => {
-          const reason = await promptDialog({ title: `ยกเลิกงาน ${job.jobCode}`, input: { label: 'เหตุผลที่ยกเลิกงาน' }, confirmText: 'ยกเลิกงาน', danger: true });
+          const reason = await promptDialog({
+            title: isRejectableRemote ? `ปฏิเสธงาน ${job.jobCode}` : `ยกเลิกงาน ${job.jobCode}`,
+            message: isRejectableRemote ? 'ระบบจะส่งสถานะปฏิเสธงาน (rejected) พร้อมเหตุผลกลับไปยังหอพัก' : undefined,
+            input: {
+              label: isRejectableRemote ? 'เหตุผลที่ปฏิเสธงาน (จำเป็น)' : 'เหตุผลที่ยกเลิกงาน',
+              placeholder: isRejectableRemote ? 'เช่น ช่างไม่ว่างจนถึงสิ้นเดือน' : undefined,
+              required: isRejectableRemote,
+            },
+            confirmText: isRejectableRemote ? 'ปฏิเสธงาน' : 'ยกเลิกงาน',
+            danger: true,
+          });
           if (reason !== null) cancel.mutate([job.jobId, reason]);
         }}
       >
-        ยกเลิกงาน
+        {isRejectableRemote ? 'ปฏิเสธงาน' : 'ยกเลิกงาน'}
       </Button>
     ),
   ].filter(Boolean);
@@ -132,6 +165,71 @@ function Actions({ job }: { job: JobDetail }) {
       <div className="flex flex-col gap-2">{buttons}</div>
       <ErrorText error={start.error ?? complete.error ?? cancel.error} />
       {assignOpen && <AssignTechnicianModal job={job} open onClose={() => setAssignOpen(false)} />}
+    </Card>
+  );
+}
+
+const REMOTE_STATUS_TH: Record<string, { label: string; tone: 'neutral' | 'warning' | 'info' | 'brand' | 'success' | 'danger' }> = {
+  sent: { label: 'sent · รอตอบรับ', tone: 'warning' },
+  accepted: { label: 'accepted · รับงานแล้ว', tone: 'info' },
+  in_progress: { label: 'in_progress · กำลังซ่อม', tone: 'brand' },
+  done: { label: 'done · ซ่อมเสร็จ', tone: 'success' },
+  rejected: { label: 'rejected · ปฏิเสธงาน', tone: 'danger' },
+  cancelled: { label: 'cancelled · หอพักยกเลิก', tone: 'neutral' },
+};
+
+function RepairApiCard({ job, role }: { job: JobDetail; role: string }) {
+  const sync = useJobMutation(jobService.syncRemote);
+  if (!job.remoteJobId) return null;
+  const payload = (job.remotePayload ?? {}) as Record<string, unknown>;
+  const st = REMOTE_STATUS_TH[job.remoteStatus ?? ''] ?? { label: job.remoteStatus ?? '-', tone: 'neutral' as const };
+  const canSync = role === 'ADMIN' || role === 'TECHNICIAN';
+
+  return (
+    <Card className="space-y-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-semibold">สถานะฝั่งหอพัก #{job.remoteJobId}</h2>
+        <Badge tone={st.tone}>{st.label}</Badge>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs text-espresso-600">
+        {typeof payload.category === 'string' && (
+          <div><span className="text-espresso-400">หมวด:</span> {payload.category}</div>
+        )}
+        {typeof payload.preferred_time === 'string' && (
+          <div><span className="text-espresso-400">เวลาสะดวก:</span> {payload.preferred_time}</div>
+        )}
+        {typeof payload.sent_by_name === 'string' && (
+          <div><span className="text-espresso-400">ผู้ส่งงาน:</span> {payload.sent_by_name}</div>
+        )}
+        {typeof payload.scheduled_at === 'string' && (
+          <div><span className="text-espresso-400">นัดฝั่งหอพัก:</span> {formatDateTime(payload.scheduled_at)}</div>
+        )}
+      </div>
+      {job.remoteDetailsUpdatedAt && (
+        <p className="text-xs text-espresso-500">หอพักแก้ไขข้อมูลล่าสุด: {formatDateTime(job.remoteDetailsUpdatedAt)}</p>
+      )}
+      {job.remoteSyncedAt && (
+        <p className="text-xs text-espresso-500">ซิงค์ล่าสุด: {formatDateTime(job.remoteSyncedAt)}</p>
+      )}
+      {job.remoteSyncError && (
+        <div className="rounded-lg bg-danger-soft p-2.5 text-xs text-danger">
+          <p className="font-medium">ซิงค์กลับหอพักไม่สำเร็จ:</p>
+          <p>{job.remoteSyncError}</p>
+        </div>
+      )}
+      {canSync && (
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" className="text-xs" onClick={() => sync.mutate([job.jobId, 'pull'])} disabled={sync.isPending}>
+            <RefreshCw className={`h-3.5 w-3.5 ${sync.isPending ? 'animate-spin' : ''}`} /> ดึงล่าสุด
+          </Button>
+          {job.remoteSyncError && (
+            <Button className="text-xs" onClick={() => sync.mutate([job.jobId, 'push'])} disabled={sync.isPending}>
+              ส่งสถานะกลับอีกครั้ง
+            </Button>
+          )}
+        </div>
+      )}
+      <ErrorText error={sync.error} />
     </Card>
   );
 }
@@ -150,8 +248,12 @@ function nextStepHint(job: JobDetail, role: string) {
   }
   const hints: Partial<Record<JobDetail['status'], Record<string, string>>> = {
     NEW: { ADMIN: 'มอบหมายช่างและนัดวันประเมินหน้างาน', USER: 'รอแอดมินนัดช่างเข้าประเมิน' },
-    SURVEY_ASSIGNED: { TECHNICIAN: 'เข้าหน้างานตามนัดแล้วบันทึกผลประเมิน', ADMIN: 'รอช่างส่งผลประเมิน', USER: 'ช่างจะเข้าประเมินตามวันนัด' },
-    SURVEYED: { ADMIN: 'ร่างสัญญาจากผลประเมินแล้วส่งให้ลูกค้า', USER: 'รอแอดมินส่งสัญญา', TECHNICIAN: 'รอทำสัญญา' },
+    SURVEY_ASSIGNED: {
+      TECHNICIAN: job.remoteJobId ? 'เข้าหน้างานตามนัด: บันทึกผลประเมิน หรือกด "เริ่มซ่อมงาน" เพื่อแจ้งหอพักว่ากำลังซ่อม' : 'เข้าหน้างานตามนัดแล้วบันทึกผลประเมิน',
+      ADMIN: 'รอช่างส่งผลประเมินหรือเริ่มซ่อมงาน',
+      USER: 'ช่างจะเข้าประเมินตามวันนัด',
+    },
+    SURVEYED: { ADMIN: 'ร่างสัญญาจากผลประเมินแล้วส่งให้ลูกค้า', USER: 'รอแอดมินส่งสัญญา', TECHNICIAN: job.remoteJobId ? 'กด "เริ่มซ่อมงาน" หรือรอทำสัญญา' : 'รอทำสัญญา' },
     QUOTED: { USER: 'ตรวจสอบและลงนามสัญญา', ADMIN: 'รอลูกค้าลงนาม', TECHNICIAN: 'รอลูกค้าลงนาม' },
     CONTRACTED: { TECHNICIAN: 'เบิกวัสดุแล้วกดเริ่มงาน (หัวหน้าช่าง)', ADMIN: 'รอหัวหน้าช่างเริ่มงาน', USER: 'ชำระงวดแรกตามสัญญา' },
     IN_PROGRESS: { TECHNICIAN: 'บันทึกงานรายวัน พบงานเพิ่มให้กด "แจ้งงานเพิ่ม"', ADMIN: 'ติดตามความคืบหน้า อนุมัติใบเบิก (หัวหน้าช่างเป็นคนส่งมอบงาน)', USER: 'ติดตามความคืบหน้า' },

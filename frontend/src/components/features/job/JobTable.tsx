@@ -31,8 +31,12 @@ export default function JobTable({ jobs, empty = 'ยังไม่มีงา
                 <span>· {JOB_TYPE[j.jobType]}</span>
                 {j.priority === 'URGENT' && <Badge tone={PRIORITY.URGENT.tone}>{PRIORITY.URGENT.label}</Badge>}
                 {j.source === 'PARTNER' && (
-                  <Badge tone="info"><PlugZap className="mr-1 h-3 w-3" />{j.partnerName}</Badge>
+                  <Badge tone="info">
+                    <PlugZap className="mr-1 h-3 w-3" />
+                    {j.partnerName}{j.remoteJobId ? ` #${j.remoteJobId}` : ''}
+                  </Badge>
                 )}
+                {j.remoteSyncError && <Badge tone="danger">ซิงค์หอพักไม่สำเร็จ</Badge>}
               </div>
             </Td>
             <Td>

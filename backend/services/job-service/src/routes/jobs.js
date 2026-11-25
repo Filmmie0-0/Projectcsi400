@@ -2,10 +2,11 @@ import { Router } from 'express';
 import { pool, tx, nextCode } from '../db.js';
 import { HttpError, camel, currentUser, requireRole } from '../http.js';
 import {
-  COMPANY_CONTACT, assertCanView, assertOwnerApproved, assertStatus, assignment, enqueueWebhook, getJobDetail, loadJob, moveStatus,
+  COMPANY_CONTACT, assertCanView, assertOwnerApproved, assertStatus, assignment, cancelJob, enqueueWebhook, getJobDetail, loadJob, moveStatus,
   recordOwnerDecision, technicianContacts,
 } from '../jobs.js';
 import { fetchOwnerContact } from '../partnerClient.js';
+import { pushJobStatusToPartner, syncSingleRemoteJob } from '../repairSync.js';
 
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL ?? 'http://localhost:4001';
 const JOB_TYPES = ['INSPECTION', 'RENOVATION'];
@@ -74,7 +75,7 @@ router.get('/api/jobs', async (req, res) => {
   if (req.query.type) { where.push('j.job_type = ?'); params.push(req.query.type); }
   const [rows] = await pool.query(
     `SELECT j.job_id, j.job_code, j.job_type, j.source, j.title, j.priority, j.status, j.preferred_date, j.created_at,
-            j.work_scope, j.owner_approval,
+            j.work_scope, j.owner_approval, j.remote_job_id, j.remote_status, j.remote_sync_error,
             u.code AS unit_code, u.unit_type, b.name AS building_name, p.name AS partner_name,
             (SELECT technician_name FROM job_assignments a WHERE a.job_id = j.job_id AND a.is_lead = 1 LIMIT 1) AS lead_technician,
             (SELECT scheduled_date FROM site_surveys s WHERE s.job_id = j.job_id AND s.status = 'SCHEDULED' LIMIT 1) AS survey_date,
@@ -124,8 +125,9 @@ router.get('/api/jobs/:id', async (req, res) => {
 // NEW: มอบหมายช่าง + นัดวันประเมินหน้างาน (ช่างหัวหน้าเป็นคนประเมิน)
 // สถานะอื่นก่อนจบงาน: เพิ่ม/เปลี่ยนทีมช่างอย่างเดียว
 router.post('/api/jobs/:id/assign', requireRole('ADMIN'), async (req, res) => {
-  const { technicianIds = [], leadId, scheduledDate } = req.body;
+  const { technicianIds = [], leadId, scheduledDate, scheduledTime, note } = req.body ?? {};
   if (!technicianIds.length || !technicianIds.includes(leadId)) throw new HttpError(422, 'VALIDATION', 'เลือกช่างและหัวหน้าช่าง');
+  if (note && String(note).length > 500) throw new HttpError(422, 'VALIDATION', 'หมายเหตุยาวเกิน 500 ตัวอักษร');
 
   const techs = await Promise.all(technicianIds.map(async (id) => {
     const r = await fetch(`${AUTH_SERVICE_URL}/internal/users/${id}`);
@@ -160,13 +162,14 @@ router.post('/api/jobs/:id/assign', requireRole('ADMIN'), async (req, res) => {
       await moveStatus(conn, job, 'SURVEY_ASSIGNED', `นัดประเมินหน้างาน ${scheduledDate}`);
     }
   });
+  await pushJobStatusToPartner(Number(req.params.id), { scheduledDate, scheduledTime, note });
   res.json(await getJobDetail(Number(req.params.id)));
 });
 
 // ช่างส่งผลประเมิน: SURVEY_ASSIGNED → SURVEYED (ครั้งแรก) หรือแจ้งงานเพิ่มระหว่างทำ (ADDITIONAL → ใช้ทำสัญญาเพิ่มเติม)
 router.post('/api/jobs/:id/surveys', requireRole('TECHNICIAN'), async (req, res) => {
   const user = currentUser(req);
-  const { summary, estDays, needRepair, items = [] } = req.body;
+  const { summary, estDays, needRepair, items = [] } = req.body ?? {};
   if (!summary?.trim() || !(Number(estDays) > 0)) throw new HttpError(422, 'VALIDATION', 'กรอกสรุปผลและจำนวนวันที่ประเมิน');
   for (const i of items) {
     if (!i.area || !i.item || !CONDITIONS.includes(i.itemCondition) || !ACTIONS.includes(i.action ?? 'NONE')) {
@@ -174,6 +177,7 @@ router.post('/api/jobs/:id/surveys', requireRole('TECHNICIAN'), async (req, res)
     }
   }
 
+  let autoCompleted = false;
   await tx(user.id, async (conn) => {
     const job = await loadJob(conn, req.params.id, { lock: true });
     if (!(await assignment(conn, job.job_id, user.id))) throw new HttpError(403, 'FORBIDDEN', 'คุณไม่ได้รับมอบหมายงานนี้');
@@ -212,28 +216,45 @@ router.post('/api/jobs/:id/surveys', requireRole('TECHNICIAN'), async (req, res)
 
     if (job.status === 'SURVEY_ASSIGNED') {
       await moveStatus(conn, job, 'SURVEYED');
-      if (job.job_type === 'INSPECTION' && !needRepair) await moveStatus(conn, job, 'COMPLETED', 'ตรวจแล้วไม่พบจุดที่ต้องซ่อม');
+      if (job.job_type === 'INSPECTION' && !needRepair) {
+        await moveStatus(conn, job, 'COMPLETED', 'ตรวจแล้วไม่พบจุดที่ต้องซ่อม');
+        autoCompleted = true;
+      }
     }
   });
+  if (autoCompleted) {
+    await pushJobStatusToPartner(Number(req.params.id), { note: `ตรวจห้องแล้วไม่พบจุดที่ต้องซ่อม: ${summary.trim()}` });
+  }
   res.status(201).json(await getJobDetail(Number(req.params.id)));
 });
 
-// หัวหน้าช่างของงานเท่านั้นที่เริ่มงานได้ (หลังลูกค้าเซ็นสัญญา)
+// หัวหน้าช่างของงานเท่านั้นที่เริ่มงานได้ (หลังลูกค้าเซ็นสัญญา หรือสำหรับงาน Repair API ที่อยู่ภายใต้สัญญาหอพักแล้ว)
 router.post('/api/jobs/:id/start', requireRole('TECHNICIAN'), async (req, res) => {
   const user = currentUser(req);
+  const { note } = req.body ?? {};
   await tx(user.id, async (conn) => {
     const job = await loadJob(conn, req.params.id, { lock: true });
     await assertLead(conn, job, user);
-    assertStatus(job, 'CONTRACTED');
+    if (job.remote_job_id) {
+      const [[pendingContract]] = await conn.query(
+        `SELECT COUNT(*) AS n FROM contracts WHERE job_id = ? AND status IN ('DRAFT','SENT')`,
+        [job.job_id],
+      );
+      if (pendingContract.n > 0) throw new HttpError(409, 'CONTRACT_PENDING', 'มีสัญญารอลงนาม กรุณาให้ลูกค้าลงนามก่อนเริ่มงาน');
+      assertStatus(job, 'SURVEY_ASSIGNED', 'SURVEYED', 'CONTRACTED');
+    } else {
+      assertStatus(job, 'CONTRACTED');
+    }
     assertOwnerApproved(job);
-    await moveStatus(conn, job, 'IN_PROGRESS');
+    await moveStatus(conn, job, 'IN_PROGRESS', note || null);
   });
+  await pushJobStatusToPartner(Number(req.params.id), { note });
   res.json(await getJobDetail(Number(req.params.id)));
 });
 
 router.post('/api/jobs/:id/work-logs', requireRole('TECHNICIAN'), async (req, res) => {
   const user = currentUser(req);
-  const { workDate, hours, progressPct, note, photoUrl } = req.body;
+  const { workDate, hours, progressPct, note, photoUrl } = req.body ?? {};
   if (!workDate || !note?.trim()) throw new HttpError(422, 'VALIDATION', 'กรอกวันที่และรายละเอียดงาน');
   await tx(user.id, async (conn) => {
     const job = await loadJob(conn, req.params.id);
@@ -253,12 +274,13 @@ router.post('/api/jobs/:id/work-logs', requireRole('TECHNICIAN'), async (req, re
 // ปิดงาน: หัวหน้าช่างส่งมอบงานที่ทำเสร็จ หรือแอดมินปิดงานที่ประเมินแล้วไม่ต้องซ่อม
 router.post('/api/jobs/:id/complete', requireRole('ADMIN', 'TECHNICIAN'), async (req, res) => {
   const user = currentUser(req);
+  const { remark } = req.body ?? {};
   await tx(user.id, async (conn) => {
     const job = await loadJob(conn, req.params.id, { lock: true });
     // ประเมินแล้วแต่ไม่ทำสัญญา (ไม่ต้องซ่อม/ลูกค้าไม่ซ่อม): แอดมินปิดงานได้ทุกประเภท
     if (user.role === 'ADMIN') {
       assertStatus(job, 'SURVEYED');
-      await moveStatus(conn, job, 'COMPLETED', req.body.remark || 'ประเมินแล้ว ไม่มีงานซ่อม');
+      await moveStatus(conn, job, 'COMPLETED', remark || 'ประเมินแล้ว ไม่มีงานซ่อม');
       return;
     }
     // ส่งมอบงานที่ทำเสร็จ: หัวหน้าช่างของงานเท่านั้น
@@ -267,7 +289,10 @@ router.post('/api/jobs/:id/complete', requireRole('ADMIN', 'TECHNICIAN'), async 
     const [[pending]] = await conn.query(
       `SELECT COUNT(*) AS n FROM contracts WHERE job_id = ? AND status IN ('DRAFT','SENT')`, [job.job_id]);
     if (pending.n > 0) throw new HttpError(409, 'CONTRACT_PENDING', 'ยังมีสัญญาเพิ่มเติมที่รอลูกค้าเซ็น');
-    await moveStatus(conn, job, 'COMPLETED', req.body.remark || null);
+    await moveStatus(conn, job, 'COMPLETED', remark || null);
+  });
+  await pushJobStatusToPartner(Number(req.params.id), {
+    note: remark || (user.role === 'ADMIN' ? 'ประเมินแล้ว ไม่มีงานซ่อม' : 'ซ่อมเสร็จเรียบร้อยแล้ว'),
   });
   res.json(await getJobDetail(Number(req.params.id)));
 });
@@ -275,26 +300,49 @@ router.post('/api/jobs/:id/complete', requireRole('ADMIN', 'TECHNICIAN'), async 
 // ลูกค้ายกเลิกได้ก่อนเซ็นสัญญา แอดมินยกเลิกได้ทุกสถานะก่อนจบงาน
 router.post('/api/jobs/:id/cancel', requireRole('ADMIN', 'USER'), async (req, res) => {
   const user = currentUser(req);
+  const { reason } = req.body ?? {};
   await tx(user.id, async (conn) => {
     const job = await loadJob(conn, req.params.id, { lock: true });
     await assertCanView(conn, job, user);
+    if (job.remote_job_id && job.remote_status === 'sent' && !reason?.trim()) {
+      throw new HttpError(422, 'VALIDATION', 'กรุณาระบุเหตุผลในการปฏิเสธงานเพื่อส่งกลับระบบหอพัก');
+    }
     if (user.role === 'USER') assertStatus(job, 'NEW', 'SURVEY_ASSIGNED', 'SURVEYED', 'QUOTED');
     else assertStatus(job, 'NEW', 'SURVEY_ASSIGNED', 'SURVEYED', 'QUOTED', 'CONTRACTED', 'IN_PROGRESS');
-    await cancelJob(conn, job, req.body.reason || null);
+    await cancelJob(conn, job, reason || null);
   });
+  await pushJobStatusToPartner(Number(req.params.id), { note: reason || 'ปฏิเสธงานโดยผู้ดูแลระบบ' });
   res.json(await getJobDetail(Number(req.params.id)));
 });
 
 // ── อนุมัติจากเจ้าของหอ (เฉพาะงาน STRUCTURAL) ──
 // แอดมินโทรติดต่อเจ้าของหอตามข้อมูลใน owner_contacts แล้วบันทึกผล
 router.post('/api/jobs/:id/owner-approval', requireRole('ADMIN'), async (req, res) => {
-  const { decision, note } = req.body;
+  const { decision, note } = req.body ?? {};
   await tx(currentUser(req).id, async (conn) => {
     const job = await loadJob(conn, req.params.id, { lock: true });
     await recordOwnerDecision(conn, job, decision, note);
     if (decision === 'REJECTED') await cancelJob(conn, job, `เจ้าของหอไม่อนุมัติ${note ? `: ${note}` : ''}`);
   });
+  if (decision === 'REJECTED') {
+    await pushJobStatusToPartner(Number(req.params.id), { note: `เจ้าของหอไม่อนุมัติ${note ? `: ${note}` : ''}` });
+  }
   res.json(await getJobDetail(Number(req.params.id)));
+});
+
+// ซิงค์งาน 1 งานกับ Repair API ของหอพัก (pull = ดึงข้อมูลล่าสุด, push = ส่งสถานะล่าสุดกลับ)
+router.post('/api/jobs/:id/remote-sync', requireRole('ADMIN', 'TECHNICIAN'), async (req, res) => {
+  const user = currentUser(req);
+  const job = await loadJob(pool, req.params.id);
+  await assertCanView(pool, job, user);
+  const mode = req.body?.mode === 'push' ? 'push' : 'pull';
+  if (mode === 'push') {
+    const result = await pushJobStatusToPartner(job.job_id);
+    if (result && !result.ok && result.message) throw new HttpError(502, 'PARTNER_API_ERROR', result.message);
+  } else {
+    await syncSingleRemoteJob(job.job_id);
+  }
+  res.json(await getJobDetail(job.job_id));
 });
 
 // ขอข้อมูลติดต่อเจ้าของหอจากระบบจองห้องพักอีกครั้ง (กรณีครั้งแรกเรียก API ไม่สำเร็จ)
@@ -321,10 +369,7 @@ router.put('/api/jobs/:id/owner-contact', requireRole('ADMIN'), async (req, res)
   res.json(await getJobDetail(job.job_id));
 });
 
-export async function cancelJob(conn, job, reason) {
-  await conn.query(`UPDATE contracts SET status = 'CANCELLED' WHERE job_id = ? AND status IN ('DRAFT','SENT')`, [job.job_id]);
-  await moveStatus(conn, job, 'CANCELLED', reason);
-}
+export { cancelJob };
 
 async function assertLead(conn, job, user) {
   const a = await assignment(conn, job.job_id, user.id);

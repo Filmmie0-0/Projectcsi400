@@ -34,6 +34,7 @@ const SUCCESS = new Map<unknown, Msg>([
   [S.addWorkLog, 'บันทึกงานประจำวันแล้ว'],
   [S.complete, 'ปิดงานเรียบร้อย'],
   [S.cancel, 'ยกเลิกงานแล้ว'],
+  [S.syncRemote, 'ซิงค์ข้อมูลกับหอพักเรียบร้อย'],
   [S.ownerDecision, (a) => ((a as unknown[])[1] === 'APPROVED' ? 'บันทึกว่าเจ้าของหออนุมัติแล้ว' : 'บันทึกว่าเจ้าของหอไม่อนุมัติ งานถูกยกเลิก')],
   [S.refreshOwnerContact, 'อัปเดตข้อมูลเจ้าของหอแล้ว'],
   [S.saveOwnerContact, 'บันทึกข้อมูลเจ้าของหอแล้ว'],

@@ -2,49 +2,99 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import { pool, tx, nextCode } from '../db.js';
 import { HttpError, camel, requireRole } from '../http.js';
-import { COMPANY_CONTACT, assertStatus, loadJob, recordOwnerDecision, technicianContacts } from '../jobs.js';
-import { fetchOwnerContact } from '../partnerClient.js';
-import { WORK_SCOPES, cancelJob } from './jobs.js';
+import { COMPANY_CONTACT, assertStatus, cancelJob, loadJob, recordOwnerDecision, technicianContacts } from '../jobs.js';
+import { fetchBuildingOwnerByRef, fetchOwnerContact } from '../partnerClient.js';
+import { fetchRemoteVendor, handleIncomingRepairWebhook, pushJobStatusToPartner, syncPartnerJobs } from '../repairSync.js';
+import { WORK_SCOPES } from './jobs.js';
 
 export const router = Router();
 
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const newApiKey = () => `pk_live_${crypto.randomBytes(16).toString('hex')}`;
+const INTEGRATION_MODES = ['PARTNER_PUSH', 'REPAIR_API_V1'];
+const isValidHttpUrl = (u) => /^https?:\/\/.+/i.test(String(u ?? '').trim());
 
 // ───────────── Admin: จัดการพาร์ทเนอร์ (/api/partners) ─────────────
 router.get('/api/partners', requireRole('ADMIN'), async (_req, res) => {
   const [rows] = await pool.query(
-    `SELECT p.partner_id, p.name, p.owner_user_id, p.api_key_prefix, p.webhook_url, p.api_base_url, p.is_active, p.created_at,
+    `SELECT p.partner_id, p.name, p.owner_user_id, p.integration_mode, p.api_key_prefix, p.webhook_url, p.api_base_url,
             p.outbound_api_key IS NOT NULL AS has_outbound_key,
+            IF(p.outbound_api_key IS NOT NULL, CONCAT(LEFT(p.outbound_api_key, 8), '...'), NULL) AS outbound_key_prefix,
+            p.default_building_ref, p.default_building_name, p.default_building_address,
+            p.sync_enabled, p.last_synced_at, p.last_sync_error, p.is_active, p.created_at,
             (SELECT COUNT(*) FROM jobs j WHERE j.partner_id = p.partner_id) AS total_jobs,
             (SELECT COUNT(*) FROM webhook_deliveries w WHERE w.partner_id = p.partner_id AND w.status = 'FAILED') AS failed_webhooks
-     FROM partners p ORDER BY p.name`,
+     FROM partners p ORDER BY p.partner_id DESC`,
   );
-  res.json(rows.map(camel));
+  res.json(rows.map((r) => ({
+    ...camel(r),
+    hasOutboundKey: Boolean(r.has_outbound_key),
+    syncEnabled: Boolean(r.sync_enabled),
+  })));
 });
 
 // คีย์และ secret แสดงครั้งเดียวตอนสร้าง (DB เก็บแค่ hash ของคีย์)
 router.post('/api/partners', requireRole('ADMIN'), async (req, res) => {
-  const { name, ownerUserId, webhookUrl, apiBaseUrl, outboundApiKey } = req.body;
+  const {
+    name, ownerUserId, integrationMode = 'PARTNER_PUSH', webhookUrl, apiBaseUrl, outboundApiKey,
+    defaultBuildingRef, defaultBuildingName, defaultBuildingAddress, syncEnabled = true,
+  } = req.body ?? {};
   if (!name?.trim() || !ownerUserId) throw new HttpError(422, 'VALIDATION', 'กรอกชื่อพาร์ทเนอร์และบัญชีผู้ใช้ตัวแทน');
+  if (!INTEGRATION_MODES.includes(integrationMode)) throw new HttpError(422, 'VALIDATION', 'integrationMode ไม่ถูกต้อง');
+  if (integrationMode === 'REPAIR_API_V1') {
+    if (!isValidHttpUrl(apiBaseUrl)) throw new HttpError(422, 'VALIDATION', 'กรอก API Base URL ที่ถูกต้อง (http/https)');
+    if (!outboundApiKey?.trim()) throw new HttpError(422, 'VALIDATION', 'กรอก API Key ที่ได้รับจากหอพัก');
+  }
   const apiKey = newApiKey();
   const webhookSecret = `whsec_${crypto.randomBytes(16).toString('hex')}`;
   const [r] = await pool.query(
-    `INSERT INTO partners (name, owner_user_id, api_key_prefix, api_key_hash, webhook_url, webhook_secret, api_base_url, outbound_api_key)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [name.trim(), ownerUserId, apiKey.slice(0, 12), sha256(apiKey), webhookUrl || null, webhookSecret,
-     apiBaseUrl || null, outboundApiKey || null],
+    `INSERT INTO partners (name, owner_user_id, integration_mode, api_key_prefix, api_key_hash, webhook_url, webhook_secret,
+                           api_base_url, outbound_api_key, default_building_ref, default_building_name, default_building_address, sync_enabled)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      name.trim(), ownerUserId, integrationMode, apiKey.slice(0, 12), sha256(apiKey), webhookUrl?.trim() || null, webhookSecret,
+      apiBaseUrl?.trim() || null, outboundApiKey?.trim() || null,
+      defaultBuildingRef?.trim() || null, defaultBuildingName?.trim() || null, defaultBuildingAddress?.trim() || null,
+      Number(Boolean(syncEnabled)),
+    ],
   );
   res.status(201).json({ partnerId: r.insertId, apiKey, webhookSecret });
 });
 
 router.patch('/api/partners/:id', requireRole('ADMIN'), async (req, res) => {
-  const { webhookUrl, isActive, apiBaseUrl, outboundApiKey } = req.body;
-  await pool.query(
-    `UPDATE partners SET webhook_url = COALESCE(?, webhook_url), is_active = COALESCE(?, is_active),
-            api_base_url = COALESCE(?, api_base_url), outbound_api_key = COALESCE(?, outbound_api_key) WHERE partner_id = ?`,
-    [webhookUrl ?? null, isActive === undefined ? null : Number(Boolean(isActive)), apiBaseUrl ?? null, outboundApiKey ?? null, req.params.id],
-  );
+  const body = req.body ?? {};
+  const sets = [];
+  const params = [];
+  const add = (col, val) => { sets.push(`${col} = ?`); params.push(val); };
+
+  if ('name' in body) {
+    if (!body.name?.trim()) throw new HttpError(422, 'VALIDATION', 'กรอกชื่อพาร์ทเนอร์');
+    add('name', body.name.trim());
+  }
+  if ('ownerUserId' in body && body.ownerUserId) add('owner_user_id', Number(body.ownerUserId));
+  if ('integrationMode' in body) {
+    if (!INTEGRATION_MODES.includes(body.integrationMode)) throw new HttpError(422, 'VALIDATION', 'integrationMode ไม่ถูกต้อง');
+    add('integration_mode', body.integrationMode);
+  }
+  if ('webhookUrl' in body) add('webhook_url', body.webhookUrl?.trim() || null);
+  if ('apiBaseUrl' in body) {
+    if (body.apiBaseUrl?.trim() && !isValidHttpUrl(body.apiBaseUrl)) {
+      throw new HttpError(422, 'VALIDATION', 'API Base URL ต้องเป็น http/https');
+    }
+    add('api_base_url', body.apiBaseUrl?.trim() || null);
+  }
+  if ('outboundApiKey' in body && body.outboundApiKey?.trim()) add('outbound_api_key', body.outboundApiKey.trim());
+  if (body.clearOutboundKey) add('outbound_api_key', null);
+  if ('defaultBuildingRef' in body) add('default_building_ref', body.defaultBuildingRef?.trim() || null);
+  if ('defaultBuildingName' in body) add('default_building_name', body.defaultBuildingName?.trim() || null);
+  if ('defaultBuildingAddress' in body) add('default_building_address', body.defaultBuildingAddress?.trim() || null);
+  if ('syncEnabled' in body) add('sync_enabled', Number(Boolean(body.syncEnabled)));
+  if ('isActive' in body) add('is_active', Number(Boolean(body.isActive)));
+
+  if (!sets.length) return res.json({ ok: true });
+  params.push(req.params.id);
+  const [r] = await pool.query(`UPDATE partners SET ${sets.join(', ')} WHERE partner_id = ?`, params);
+  if (!r.affectedRows) throw new HttpError(404, 'NOT_FOUND', 'ไม่พบพาร์ทเนอร์');
   res.json({ ok: true });
 });
 
@@ -55,6 +105,41 @@ router.post('/api/partners/:id/rotate-key', requireRole('ADMIN'), async (req, re
   ]);
   if (!r.affectedRows) throw new HttpError(404, 'NOT_FOUND', 'ไม่พบพาร์ทเนอร์');
   res.json({ apiKey });
+});
+
+router.get('/api/partners/:id/remote-vendor', requireRole('ADMIN'), async (req, res) => {
+  const [[partner]] = await pool.query('SELECT * FROM partners WHERE partner_id = ?', [req.params.id]);
+  if (!partner) throw new HttpError(404, 'NOT_FOUND', 'ไม่พบพาร์ทเนอร์');
+  res.json(await fetchRemoteVendor(partner));
+});
+
+router.post('/api/partners/:id/sync', requireRole('ADMIN'), async (req, res) => {
+  const summary = await syncPartnerJobs(Number(req.params.id), {
+    statusFilter: req.body?.status ? String(req.body.status) : '',
+    manual: true,
+  });
+  res.json(summary);
+});
+
+router.get('/api/partners/:id/sync-logs', requireRole('ADMIN'), async (req, res) => {
+  const [rows] = await pool.query(
+    `SELECT log_id, partner_id, job_id, remote_job_id, direction, action, status, http_status, detail, error_message, created_at
+     FROM partner_sync_logs WHERE partner_id = ? ORDER BY log_id DESC LIMIT 50`,
+    [req.params.id],
+  );
+  res.json(rows.map(camel));
+});
+
+router.get('/api/partners/:id/remote-owner', requireRole('ADMIN'), async (req, res) => {
+  const [[partner]] = await pool.query('SELECT * FROM partners WHERE partner_id = ?', [req.params.id]);
+  if (!partner) throw new HttpError(404, 'NOT_FOUND', 'ไม่พบพาร์ทเนอร์');
+  const ref = String(req.query.ref || partner.default_building_ref || '').trim();
+  if (!ref) throw new HttpError(422, 'VALIDATION', 'ระบุรหัสอาคาร (?ref=...) หรือตั้งค่ารหัสอาคารเริ่มต้นของพาร์ทเนอร์');
+  try {
+    res.json(await fetchBuildingOwnerByRef(partner, ref));
+  } catch (err) {
+    throw new HttpError(502, 'PARTNER_API_ERROR', err.message);
+  }
 });
 
 router.get('/api/partners/:id/deliveries', requireRole('ADMIN'), async (req, res) => {
@@ -78,12 +163,32 @@ async function listDeliveries(partnerId) {
   return rows.map(camel);
 }
 
-// ───────────── Partner API v1 (ระบบจองห้องพักเรียกด้วย X-API-Key) ─────────────
+// ───────────── Webhook ขาเข้าจาก Repair API v1 ของหอพัก (ข้อ 7: ตอบ 200 ภายใน 5 วิ แล้วยืนยันด้วย GET /jobs/:id) ─────────────
+function receiveRepairWebhook(req, res) {
+  const payload = req.body ?? {};
+  const eventName = req.get('X-Repair-Event') || payload.event;
+  if (!payload?.job?.id) throw new HttpError(400, 'VALIDATION_ERROR', 'ต้องส่ง job.id ใน webhook payload');
+
+  const partnerId = req.params.partnerId ? Number(req.params.partnerId) : null;
+  const headerKey = req.get('X-Repair-Api-Key') || req.get('X-API-Key') || null;
+  res.status(200).json({ ok: true, received: true });
+
+  setImmediate(() => {
+    handleIncomingRepairWebhook({ partnerId, headerKey, eventName, payload }).catch((err) => {
+      console.error('repair webhook verify error:', err.message);
+    });
+  });
+}
+
+router.post('/api/partner/v1/repair-webhook', receiveRepairWebhook);
+router.post('/api/partner/v1/repair-webhook/:partnerId', receiveRepairWebhook);
+
+// ───────────── Partner API v1 (ระบบจองห้องพักเรียกด้วย X-API-Key หรือ X-Repair-Api-Key) ─────────────
 const partnerApi = Router();
 router.use('/api/partner/v1', partnerApi);
 
 partnerApi.use(async (req, _res, next) => {
-  const key = req.get('X-API-Key');
+  const key = req.get('X-API-Key') || req.get('X-Repair-Api-Key');
   const [[p]] = key ? await pool.query('SELECT * FROM partners WHERE api_key_hash = ? AND is_active = 1', [sha256(key)]) : [[]];
   if (!p) throw new HttpError(401, 'INVALID_API_KEY', 'API key ไม่ถูกต้องหรือถูกปิดใช้งาน');
   req.partner = p;
@@ -185,12 +290,15 @@ partnerApi.post('/jobs/:externalRef/cancel', async (req, res) => {
 // ระบบจองห้องพักถามเจ้าของหอในระบบตัวเองแล้วส่งผลมา (ทางเลือกแทนให้แอดมินเราโทรถาม)
 partnerApi.post('/jobs/:externalRef/owner-approval', async (req, res) => {
   const found = await findPartnerJob(req);
-  const { decision, note } = req.body;
+  const { decision, note } = req.body ?? {};
   await tx(null, async (conn) => {
     const job = await loadJob(conn, found.job_id, { lock: true });
     await recordOwnerDecision(conn, job, decision, note);
     if (decision === 'REJECTED') await cancelJob(conn, job, `เจ้าของหอไม่อนุมัติ${note ? `: ${note}` : ''}`);
   });
+  if (decision === 'REJECTED') {
+    await pushJobStatusToPartner(found.job_id, { note: `เจ้าของหอไม่อนุมัติ${note ? `: ${note}` : ''}` });
+  }
   const [[job]] = await pool.query('SELECT * FROM jobs WHERE job_id = ?', [found.job_id]);
   res.json(partnerJobView(job));
 });

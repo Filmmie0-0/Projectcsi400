@@ -52,6 +52,11 @@ export interface JobListItem {
   leadTechnician: string | null;
   surveyDate: string | null;
   progressPct: number | null;
+  workScope?: WorkScope;
+  ownerApproval?: OwnerApproval;
+  remoteJobId?: number | null;
+  remoteStatus?: string | null;
+  remoteSyncError?: string | null;
 }
 
 export interface Assignment {
@@ -218,6 +223,12 @@ export interface JobDetail {
   ownerApproval: OwnerApproval;
   ownerContact: OwnerContact | null;
   status: JobStatus;
+  remoteJobId: number | null;
+  remoteStatus: string | null;
+  remoteDetailsUpdatedAt: string | null;
+  remoteSyncedAt: string | null;
+  remoteSyncError: string | null;
+  remotePayload: Record<string, unknown> | null;
   completedAt: string | null;
   createdAt: string;
   unitCode: string;

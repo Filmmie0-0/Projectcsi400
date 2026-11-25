@@ -37,8 +37,10 @@ export default function TechDashboardPage() {
     .sort((a, b) => (a.surveyDate ?? '9').localeCompare(b.surveyDate ?? '9'));
   const surveysToday = surveys.filter((j) => (daysFromToday(j.surveyDate) ?? 1) <= 0);
   const inProgress = all.filter((j) => j.status === 'IN_PROGRESS');
-  const readyToStart = all.filter((j) => j.status === 'CONTRACTED');
-  const waiting = all.filter((j) => ['SURVEYED', 'QUOTED'].includes(j.status));
+  const readyToStart = all.filter(
+    (j) => j.status === 'CONTRACTED' || (j.remoteJobId != null && j.status === 'SURVEYED' && j.ownerApproval !== 'PENDING'),
+  );
+  const waiting = all.filter((j) => (j.status === 'SURVEYED' && j.remoteJobId == null) || j.status === 'QUOTED');
   const done = all.filter((j) => j.status === 'COMPLETED');
   const myReqs = reqs.data ?? [];
   const reqPending = myReqs.filter((r) => r.status === 'PENDING').length;
@@ -142,7 +144,7 @@ function AlertLink({ to, icon: Icon, label, value, danger }: { to: string; icon:
 
 function WorkCard({ job: j }: { job: JobListItem }) {
   const pct = Math.min(100, Math.max(0, j.progressPct ?? 0));
-  const ready = j.status === 'CONTRACTED';
+  const ready = j.status !== 'IN_PROGRESS';
   return (
     <Link to={`/jobs/${j.jobId}`} className="block">
       <Card className="p-4 transition-shadow hover:shadow-lift">
@@ -156,7 +158,7 @@ function WorkCard({ job: j }: { job: JobListItem }) {
         </p>
         {ready ? (
           <p className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-walnut-700">
-            <PlayCircle className="h-4 w-4" /> ลูกค้าเซ็นแล้ว — เบิกวัสดุแล้วกดเริ่มงาน
+            <PlayCircle className="h-4 w-4" /> {j.status === 'CONTRACTED' ? 'ลูกค้าเซ็นแล้ว — เบิกวัสดุแล้วกดเริ่มงาน' : 'พร้อมเริ่มซ่อมงาน (งานจากหอพัก)'}
           </p>
         ) : (
           <div className="mt-3">

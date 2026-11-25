@@ -49,7 +49,7 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', CORS_ORIGINS.includes(reqOrigin) ? reqOrigin : CORS_ORIGINS[0]);
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-API-Key');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-API-Key, X-Repair-Api-Key, X-Repair-Event');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   // ห้าม client ส่งตัวตนมาเอง: ค่าเหล่านี้มาจากการตรวจ token เท่านั้น
   delete req.headers['x-user-id'];
@@ -99,7 +99,8 @@ const mockOwners = {
 };
 
 app.get('/mock-partner/api/buildings/:ref/owner', (req, res) => {
-  if (req.get('X-API-Key') !== MOCK_PARTNER_OUTBOUND_KEY) return res.status(401).json({ message: 'invalid api key' });
+  const key = req.get('X-API-Key') || req.get('X-Repair-Api-Key');
+  if (key !== MOCK_PARTNER_OUTBOUND_KEY) return res.status(401).json({ message: 'invalid api key' });
   const owner = mockOwners[req.params.ref];
   if (!owner) return res.status(404).json({ message: 'building not found' });
   res.json(owner);

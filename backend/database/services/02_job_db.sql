@@ -11,17 +11,24 @@ USE job_db;
 -- api_base_url / outbound_api_key = ฝั่งที่ "เรา" เรียก API ของพาร์ทเนอร์ (server คุยกับ server) เช่น ขอข้อมูลติดต่อเจ้าของหอ
 --   outbound_api_key ต้องเก็บแบบอ่านได้เพราะเราต้องส่งออกไปเอง (คนละคีย์กับ api_key ที่พาร์ทเนอร์ใช้เรียกเรา)
 CREATE TABLE partners (
-  partner_id      BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  name            VARCHAR(150) NOT NULL,
-  owner_user_id   BIGINT UNSIGNED NOT NULL,
-  api_key_prefix  VARCHAR(12) NOT NULL,
-  api_key_hash    CHAR(64) NOT NULL,
-  webhook_url     VARCHAR(500) NULL,
-  webhook_secret  VARCHAR(64) NOT NULL,
-  api_base_url    VARCHAR(500) NULL,
+  partner_id       BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  name             VARCHAR(150) NOT NULL,
+  owner_user_id    BIGINT UNSIGNED NOT NULL,
+  integration_mode ENUM('PARTNER_PUSH','REPAIR_API_V1') NOT NULL DEFAULT 'PARTNER_PUSH',
+  api_key_prefix   VARCHAR(12) NOT NULL,
+  api_key_hash     CHAR(64) NOT NULL,
+  webhook_url      VARCHAR(500) NULL,
+  webhook_secret   VARCHAR(64) NOT NULL,
+  api_base_url     VARCHAR(500) NULL,
   outbound_api_key VARCHAR(100) NULL,
-  is_active       TINYINT(1) NOT NULL DEFAULT 1,
-  created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  default_building_ref     VARCHAR(64) NULL,
+  default_building_name    VARCHAR(200) NULL,
+  default_building_address TEXT NULL,
+  sync_enabled     TINYINT(1) NOT NULL DEFAULT 1,
+  last_synced_at   TIMESTAMP NULL,
+  last_sync_error  VARCHAR(500) NULL,
+  is_active        TINYINT(1) NOT NULL DEFAULT 1,
+  created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (partner_id),
   UNIQUE KEY uq_partner_key (api_key_hash)
 ) ENGINE=InnoDB;
@@ -82,12 +89,19 @@ CREATE TABLE jobs (
   owner_approval  ENUM('NOT_REQUIRED','PENDING','APPROVED','REJECTED') NOT NULL DEFAULT 'NOT_REQUIRED',
   status          ENUM('NEW','SURVEY_ASSIGNED','SURVEYED','QUOTED','CONTRACTED','IN_PROGRESS','COMPLETED','CANCELLED')
                   NOT NULL DEFAULT 'NEW',
+  remote_job_id             BIGINT UNSIGNED NULL,
+  remote_status             VARCHAR(30) NULL,
+  remote_details_updated_at VARCHAR(40) NULL,
+  remote_synced_at          TIMESTAMP NULL,
+  remote_sync_error         VARCHAR(500) NULL,
+  remote_payload            JSON NULL,
   completed_at    TIMESTAMP NULL,
   created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (job_id),
   UNIQUE KEY uq_job_code (job_code),
   UNIQUE KEY uq_job_partner_ref (partner_id, external_ref),   -- idempotency ของ Partner API
+  UNIQUE KEY uq_job_remote (partner_id, remote_job_id),
   KEY idx_job_requester (requester_id, status),
   KEY idx_job_status (status),
   CONSTRAINT fk_job_unit    FOREIGN KEY (unit_id)    REFERENCES units(unit_id),
@@ -305,6 +319,24 @@ CREATE TABLE webhook_deliveries (
   KEY idx_wh_pending (status, next_attempt_at),
   KEY idx_wh_partner (partner_id, created_at),
   CONSTRAINT fk_wh_partner FOREIGN KEY (partner_id) REFERENCES partners(partner_id)
+) ENGINE=InnoDB;
+
+-- ประวัติการเชื่อมต่อ Repair API v1 ของระบบหอพักพาร์ทเนอร์ (poll / webhook / อัปเดตสถานะกลับ)
+CREATE TABLE partner_sync_logs (
+  log_id        BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  partner_id    BIGINT UNSIGNED NOT NULL,
+  job_id        BIGINT UNSIGNED NULL,
+  remote_job_id BIGINT UNSIGNED NULL,
+  direction     ENUM('INBOUND_POLL','INBOUND_WEBHOOK','OUTBOUND_STATUS','OUTBOUND_VENDOR','OUTBOUND_OWNER') NOT NULL,
+  action        VARCHAR(100) NOT NULL,
+  status        ENUM('OK','ERROR') NOT NULL,
+  http_status   SMALLINT UNSIGNED NULL,
+  detail        JSON NULL,
+  error_message VARCHAR(500) NULL,
+  created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (log_id),
+  KEY idx_pslog_partner (partner_id, log_id DESC),
+  CONSTRAINT fk_pslog_partner FOREIGN KEY (partner_id) REFERENCES partners(partner_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- ───────────────────────── Triggers ─────────────────────────

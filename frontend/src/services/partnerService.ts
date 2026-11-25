@@ -1,14 +1,20 @@
 import axios from 'axios';
 import { API_URL, apiClient, data } from './apiClient';
-import type { InboxEvent, Partner, PartnerJobRequest, PartnerJobView, WebhookDelivery } from '../types/partner';
+import type {
+  InboxEvent, Partner, PartnerCreateInput, PartnerJobRequest, PartnerJobView, PartnerSyncLog, PartnerSyncResult,
+  PartnerUpdateInput, RemoteVendorResponse, WebhookDelivery,
+} from '../types/partner';
 
 // แอดมินจัดการพาร์ทเนอร์ (JWT)
 export const partnerService = {
   list: () => data(apiClient.get<Partner[]>('/partners')),
-  create: (body: { name: string; ownerUserId: number; webhookUrl?: string }) =>
+  create: (body: PartnerCreateInput) =>
     data(apiClient.post<{ partnerId: number; apiKey: string; webhookSecret: string }>('/partners', body)),
-  update: (id: number, body: { webhookUrl?: string; isActive?: boolean }) => data(apiClient.patch(`/partners/${id}`, body)),
+  update: (id: number, body: PartnerUpdateInput) => data(apiClient.patch(`/partners/${id}`, body)),
   rotateKey: (id: number) => data(apiClient.post<{ apiKey: string }>(`/partners/${id}/rotate-key`)),
+  remoteVendor: (id: number) => data(apiClient.get<RemoteVendorResponse>(`/partners/${id}/remote-vendor`)),
+  sync: (id: number, status?: string) => data(apiClient.post<PartnerSyncResult>(`/partners/${id}/sync`, status ? { status } : {})),
+  syncLogs: (id: number) => data(apiClient.get<PartnerSyncLog[]>(`/partners/${id}/sync-logs`)),
   deliveries: (id: number) => data(apiClient.get<WebhookDelivery[]>(`/partners/${id}/deliveries`)),
   retryDelivery: (deliveryId: number) => data(apiClient.post(`/partners/deliveries/${deliveryId}/retry`)),
 };

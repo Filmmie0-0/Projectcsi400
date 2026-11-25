@@ -13,13 +13,15 @@ export const jobService = {
   listJobs: (params?: { status?: string; type?: string }) => data(apiClient.get<JobListItem[]>('/jobs', { params })),
   getJob: (id: number) => data(apiClient.get<JobDetail>(`/jobs/${id}`)),
   createJob: (body: JobInput) => data(apiClient.post<{ jobId: number; jobCode: string }>('/jobs', body)),
-  assign: (id: number, body: { technicianIds: number[]; leadId: number; scheduledDate?: string }) =>
+  assign: (id: number, body: { technicianIds: number[]; leadId: number; scheduledDate?: string; scheduledTime?: string; note?: string }) =>
     data(apiClient.post<JobDetail>(`/jobs/${id}/assign`, body)),
   submitSurvey: (id: number, body: SurveyInput) => data(apiClient.post<JobDetail>(`/jobs/${id}/surveys`, body)),
-  start: (id: number) => data(apiClient.post<JobDetail>(`/jobs/${id}/start`)),
+  start: (id: number, note?: string) => data(apiClient.post<JobDetail>(`/jobs/${id}/start`, note ? { note } : {})),
   addWorkLog: (id: number, body: WorkLogInput) => data(apiClient.post<JobDetail>(`/jobs/${id}/work-logs`, body)),
   complete: (id: number, remark?: string) => data(apiClient.post<JobDetail>(`/jobs/${id}/complete`, { remark })),
   cancel: (id: number, reason?: string) => data(apiClient.post<JobDetail>(`/jobs/${id}/cancel`, { reason })),
+  syncRemote: (id: number, mode: 'pull' | 'push' = 'pull') =>
+    data(apiClient.post<JobDetail>(`/jobs/${id}/remote-sync`, { mode })),
 
   // งาน STRUCTURAL: แอดมินโทรถามเจ้าของหอแล้วบันทึกผล
   ownerDecision: (id: number, decision: 'APPROVED' | 'REJECTED', note?: string) =>

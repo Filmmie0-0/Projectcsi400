@@ -2,6 +2,7 @@ import { useState } from 'react';
 import Modal from '../../ui/Modal';
 import Button from '../../ui/Button';
 import Input from '../../ui/Input';
+import Textarea from '../../ui/Textarea';
 import { ErrorText } from '../../common/QueryState';
 import { useTechnicians } from '../../../hooks/useUsers';
 import { useJobMutation } from '../../../hooks/useJobs';
@@ -9,12 +10,21 @@ import { jobService } from '../../../services/jobService';
 import { formatCurrency } from '../../../utils/formatCurrency';
 import type { JobDetail } from '../../../types/job';
 
-// งานใหม่: เลือกทีมช่าง + หัวหน้าช่าง (คนประเมินหน้างาน) + วันนัด  |  งานที่เดินแล้ว: ปรับทีมช่าง
+function defaultTimeForJob(job: JobDetail) {
+  const pref = String(job.remotePayload?.preferred_time ?? '').toLowerCase();
+  if (pref === 'afternoon') return '13:00';
+  if (pref === 'evening') return '17:00';
+  return '09:00';
+}
+
+// งานใหม่: เลือกทีมช่าง + หัวหน้าช่าง (คนประเมินหน้างาน) + วันเวลานัด  |  งานที่เดินแล้ว: ปรับทีมช่าง
 export default function AssignTechnicianModal({ job, open, onClose }: { job: JobDetail; open: boolean; onClose: () => void }) {
   const techs = useTechnicians();
   const [selected, setSelected] = useState<number[]>(job.assignments.map((a) => a.technicianId));
   const [leadId, setLeadId] = useState<number | null>(job.assignments.find((a) => a.isLead)?.technicianId ?? null);
   const [date, setDate] = useState(job.preferredDate ?? '');
+  const [time, setTime] = useState(defaultTimeForJob(job));
+  const [note, setNote] = useState('');
   const assign = useJobMutation(jobService.assign);
   const isNew = job.status === 'NEW';
 
@@ -25,13 +35,25 @@ export default function AssignTechnicianModal({ job, open, onClose }: { job: Job
   };
 
   const submit = () =>
-    assign.mutate([job.jobId, { technicianIds: selected, leadId: leadId!, scheduledDate: isNew ? date : undefined }], { onSuccess: onClose });
+    assign.mutate(
+      [
+        job.jobId,
+        {
+          technicianIds: selected,
+          leadId: leadId!,
+          scheduledDate: isNew ? date : undefined,
+          scheduledTime: isNew ? time : undefined,
+          note: note.trim() || undefined,
+        },
+      ],
+      { onSuccess: onClose },
+    );
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={isNew ? 'มอบหมายช่างและนัดประเมินหน้างาน' : 'ปรับทีมช่าง'}
+      title={isNew ? 'มอบหมายช่างและนัดเข้าหน้างาน' : 'ปรับทีมช่าง'}
       footer={<Button onClick={submit} disabled={!leadId || (isNew && !date) || assign.isPending}>บันทึก</Button>}
     >
       <div className="space-y-4">
@@ -51,7 +73,22 @@ export default function AssignTechnicianModal({ job, open, onClose }: { job: Job
             </label>
           ))}
         </div>
-        {isNew && <Input label="วันนัดประเมินหน้างาน" type="date" value={date} onChange={(e) => setDate(e.target.value)} />}
+        {isNew && (
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="วันนัดเข้าหน้างาน" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            <Input label="เวลานัด (ส่งให้หอพัก)" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+          </div>
+        )}
+        {isNew && job.remoteJobId && (
+          <Textarea
+            label="หมายเหตุถึงหอพัก (ไม่บังคับ)"
+            rows={2}
+            maxLength={500}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="เช่น นำน้ำยาแอร์ไปด้วย"
+          />
+        )}
         <ErrorText error={techs.error ?? assign.error} />
       </div>
     </Modal>

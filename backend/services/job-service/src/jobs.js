@@ -72,6 +72,11 @@ export async function moveStatus(conn, job, to, remark = null) {
   job.status = to;
 }
 
+export async function cancelJob(conn, job, reason) {
+  await conn.query(`UPDATE contracts SET status = 'CANCELLED' WHERE job_id = ? AND status IN ('DRAFT','SENT')`, [job.job_id]);
+  await moveStatus(conn, job, 'CANCELLED', reason);
+}
+
 // webhook นอกเหนือจากการเปลี่ยนสถานะ (เช่น ผลตรวจห้อง, ส่งสัญญา)
 export async function enqueueWebhook(conn, job, event, data) {
   if (!job.partner_id) return;

@@ -6,3 +6,6 @@ dist
 
 # ชุดแฟลชไดร์ฟ (portable/build-docker.mjs): ไฟล์ที่ build แล้ว ไม่เก็บใน git
 portable/dist/
+
+# Claude Code: ไฟล์ตั้งค่าส่วนตัว (มี API key)
+.claude/settings.local.json

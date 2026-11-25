@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { pool, tx, nextCode } from './db.js';
 import { HttpError } from './http.js';
 import { cancelJob, loadJob } from './jobs.js';
@@ -48,7 +49,7 @@ function parseRetryAfterMs(headerVal) {
 
 function formatApiErrorMessage(httpStatus, code, rawMessage) {
   if (httpStatus === 401 || code === 'INVALID_API_KEY') {
-    return 'API key ไม่ถูกต้อง ถูกยกเลิก หรือสัญญาซ่อมสิ้นสุดแล้ว (401 INVALID_API_KEY)';
+    return 'ระบบหอพักไม่รับ API key นี้ (401) — ให้หอพักเปิดใช้งานสัญญาช่างให้อยู่ในช่วงวันที่ปัจจุบัน หรือออก key ใหม่แล้วใส่ใน DORM_API_KEY';
   }
   if (httpStatus === 429 || code === 'RATE_LIMITED') {
     return `เรียก API เกินโควตา 120 ครั้ง/นาที (429 RATE_LIMITED)${rawMessage ? `: ${rawMessage}` : ''}`;
@@ -67,8 +68,9 @@ export async function callRepairApi(partner, method, path, body = undefined) {
   }
 
   const base = partner.api_base_url.replace(/\/+$/, '');
+  // เอกสารหอพัก: ระบบภายนอกอย่าง RenoCare ส่ง key ใน X-API-Key
   const headers = {
-    'X-Repair-Api-Key': partner.outbound_api_key,
+    'X-API-Key': partner.outbound_api_key,
     Accept: 'application/json',
   };
   const init = {
@@ -605,6 +607,66 @@ export async function pushJobStatusToPartner(jobId, opts = {}) {
     });
     return { ok: false, message: errMsg };
   }
+}
+
+// ตั้งค่าการเชื่อมต่อระบบหอพักของเพื่อนจาก env (DORM_API_BASE_URL + DORM_API_KEY) ตอน service เริ่มทำงาน
+// ใช้แถวพาร์ทเนอร์เดิมที่ชี้ไป base URL เดียวกัน (หรือแถวแรกถ้ายังไม่มี) แล้วสลับเป็นโหมด Repair API v1
+export async function configureDormPartnerFromEnv() {
+  const baseUrl = process.env.DORM_API_BASE_URL?.trim().replace(/\/+$/, '');
+  const apiKey = process.env.DORM_API_KEY?.trim();
+  if (!baseUrl || !apiKey) return;
+  const name = process.env.DORM_PARTNER_NAME?.trim() || 'หอพักพาร์ทเนอร์ (Repair API v1)';
+
+  const [[byUrl]] = await pool.query(
+    `SELECT partner_id FROM partners WHERE TRIM(TRAILING '/' FROM api_base_url) = ? ORDER BY partner_id LIMIT 1`,
+    [baseUrl],
+  );
+  const [[first]] = byUrl ? [[byUrl]] : await pool.query('SELECT partner_id FROM partners ORDER BY partner_id LIMIT 1');
+  const target = byUrl ?? first;
+
+  if (target) {
+    // webhook_url = NULL: โหมดนี้เราเป็นฝ่ายเรียก API ของหอพักเอง ไม่ต้องยิง webhook แบบ Partner Push ออกไป
+    await pool.query(
+      `UPDATE partners SET name = ?, integration_mode = 'REPAIR_API_V1', api_base_url = ?, outbound_api_key = ?,
+              webhook_url = NULL, sync_enabled = 1, is_active = 1 WHERE partner_id = ?`,
+      [name, baseUrl, apiKey, target.partner_id],
+    );
+  } else {
+    const placeholderKey = `pk_live_${crypto.randomBytes(16).toString('hex')}`;
+    await pool.query(
+      `INSERT INTO partners (name, owner_user_id, integration_mode, api_key_prefix, api_key_hash, webhook_secret,
+                             api_base_url, outbound_api_key, sync_enabled)
+       VALUES (?, ?, 'REPAIR_API_V1', ?, ?, ?, ?, ?, 1)`,
+      [
+        name, Number(process.env.DORM_OWNER_USER_ID ?? 1), placeholderKey.slice(0, 12),
+        crypto.createHash('sha256').update(placeholderKey).digest('hex'),
+        `whsec_${crypto.randomBytes(16).toString('hex')}`, baseUrl, apiKey,
+      ],
+    );
+  }
+  // งาน PARTNER_PUSH ที่ค้างส่งไปยัง URL เก่าไม่ต้องส่งต่อแล้ว
+  await pool.query(
+    `DELETE w FROM webhook_deliveries w JOIN partners p ON p.partner_id = w.partner_id
+     WHERE p.integration_mode = 'REPAIR_API_V1' AND p.webhook_url IS NULL AND w.status = 'PENDING'`,
+  );
+  console.log(`dorm partner configured: ${baseUrl}`);
+}
+
+// ข้อมูลกระดิ่งแจ้งเตือน: งานจากหอพักที่ยังรอมอบหมาย + สถานะการเชื่อมต่อ
+export async function getPartnerInbox() {
+  const [partners] = await pool.query(
+    `SELECT partner_id, name, last_synced_at, last_sync_error FROM partners
+     WHERE is_active = 1 AND integration_mode = 'REPAIR_API_V1' ORDER BY partner_id`,
+  );
+  const [jobs] = await pool.query(
+    `SELECT j.job_id, j.job_code, j.title, j.priority, j.remote_job_id, j.remote_status, j.created_at, u.code AS unit_code, p.name AS partner_name
+     FROM jobs j
+     JOIN partners p ON p.partner_id = j.partner_id
+     LEFT JOIN units u ON u.unit_id = j.unit_id
+     WHERE p.integration_mode = 'REPAIR_API_V1' AND j.status = 'NEW'
+     ORDER BY j.job_id DESC LIMIT 20`,
+  );
+  return { partners, jobs };
 }
 
 export function startRepairSyncWorker(intervalMs = Number(process.env.REPAIR_SYNC_INTERVAL_MS ?? 60_000)) {

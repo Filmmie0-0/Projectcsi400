@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { Hammer, Menu, X, LogOut } from 'lucide-react';
+import NotificationBell from '../components/common/NotificationBell';
 import { useAuthStore } from '../store/authStore';
 import { authService } from '../services/authService';
 import { MENUS, ROLE_LABEL } from './navigation/menus';
@@ -113,12 +114,7 @@ export default function DashboardLayout() {
 
           <div className="flex items-center gap-2">
             <span className="rounded-full bg-walnut-50 px-3 py-1 text-xs font-medium text-walnut-700">{ROLE_LABEL[user.role]}</span>
-            <Link
-              to="/sandbox"
-              className="rounded-lg bg-sand-200 px-4 py-2 text-sm font-medium text-espresso-900 transition-colors hover:bg-sand-300"
-            >
-              Partner Sandbox
-            </Link>
+            {user.role === 'ADMIN' && <NotificationBell />}
           </div>
         </header>
 

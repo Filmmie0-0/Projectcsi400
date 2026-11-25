@@ -78,6 +78,11 @@ services:
       DB_NAME: job_db
       DB_USER: job_svc
       DB_PASSWORD: ${JOB_DB_PASSWORD:-job_pass}
+      # ระบบหอพักของเพื่อน (Repair API v1) — RenoCare ดึงงานซ่อมเป็นระยะและส่งสถานะกลับ
+      DORM_API_BASE_URL: ${DORM_API_BASE_URL:-}
+      DORM_API_KEY: ${DORM_API_KEY:-}
+      DORM_PARTNER_NAME: ${DORM_PARTNER_NAME:-}
+      REPAIR_SYNC_INTERVAL_MS: ${REPAIR_SYNC_INTERVAL_MS:-60000}
       AUTH_SERVICE_URL: http://auth-service:4001
       # ผู้ประสานงานฝั่งเราที่ส่งให้ระบบจองห้องพักพร้อมข้อมูลช่าง
       COMPANY_CONTACT_NAME: ${COMPANY_CONTACT_NAME:-ฝ่ายประสานงาน RenoCare}

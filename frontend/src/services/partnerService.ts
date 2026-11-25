@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { API_URL, apiClient, data } from './apiClient';
 import type {
-  InboxEvent, Partner, PartnerCreateInput, PartnerJobRequest, PartnerJobView, PartnerSyncLog, PartnerSyncResult,
+  InboxEvent, Partner, PartnerCreateInput, PartnerInbox, PartnerJobRequest, PartnerJobView, PartnerSyncLog, PartnerSyncResult,
   PartnerUpdateInput, RemoteVendorResponse, WebhookDelivery,
 } from '../types/partner';
 
@@ -17,6 +17,8 @@ export const partnerService = {
   syncLogs: (id: number) => data(apiClient.get<PartnerSyncLog[]>(`/partners/${id}/sync-logs`)),
   deliveries: (id: number) => data(apiClient.get<WebhookDelivery[]>(`/partners/${id}/deliveries`)),
   retryDelivery: (deliveryId: number) => data(apiClient.post(`/partners/deliveries/${deliveryId}/retry`)),
+  inbox: () => data(apiClient.get<PartnerInbox>('/partners/inbox')),
+  syncAll: () => data(apiClient.post<Array<Partial<PartnerSyncResult> & { partnerId: number; error?: string }>>('/partners/sync-all')),
 };
 
 // Partner API v1 ตามที่ระบบจองห้องพักเรียก (X-API-Key ไม่ใช้ JWT) — ใช้ในหน้า Partner Sandbox

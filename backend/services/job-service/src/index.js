@@ -4,7 +4,7 @@ import { HttpError, errorHandler } from './http.js';
 import { router as jobRoutes } from './routes/jobs.js';
 import { router as contractRoutes } from './routes/contracts.js';
 import { router as partnerRoutes } from './routes/partners.js';
-import { startRepairSyncWorker } from './repairSync.js';
+import { configureDormPartnerFromEnv, startRepairSyncWorker } from './repairSync.js';
 import { startWebhookWorker } from './webhooks.js';
 
 const SERVICE = 'job-service';
@@ -54,6 +54,7 @@ async function initWithRetry(attempts = 10) {
 }
 
 await initWithRetry();
+await configureDormPartnerFromEnv().catch((err) => console.error('configure dorm partner:', err.message));
 startWebhookWorker();
 startRepairSyncWorker();
 

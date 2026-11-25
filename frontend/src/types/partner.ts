@@ -135,3 +135,19 @@ export interface InboxEvent {
   signatureValid: boolean;
   body: { event: string; jobCode: string; externalRef: string; [k: string]: unknown };
 }
+
+// กระดิ่งแจ้งเตือน: งานจากหอพัก (Repair API v1) ที่ยังรอมอบหมาย
+export interface PartnerInbox {
+  partners: Array<{ partnerId: number; name: string; lastSyncedAt: string | null; lastSyncError: string | null }>;
+  jobs: Array<{
+    jobId: number;
+    jobCode: string;
+    title: string;
+    priority: 'LOW' | 'NORMAL' | 'URGENT';
+    remoteJobId: number | null;
+    remoteStatus: string | null;
+    createdAt: string;
+    unitCode: string | null;
+    partnerName: string;
+  }>;
+}

@@ -80,6 +80,24 @@ export async function ensureSchema() {
     await pool.query('ALTER TABLE jobs ADD UNIQUE KEY uq_job_remote (partner_id, remote_job_id)');
   }
 
+  // ไฟล์สัญญา (PDF/รูป) ที่เพิ่มมาทีหลัง — DB ที่สร้างก่อนหน้าจะยังไม่มีตารางนี้ ทำให้หน้ารายละเอียดงาน 500
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS contract_files (
+      file_id      BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      contract_id  BIGINT UNSIGNED NOT NULL,
+      kind         ENUM('CONTRACT','SIGNED') NOT NULL,
+      file_name    VARCHAR(200) NOT NULL,
+      mime_type    VARCHAR(50) NOT NULL,
+      size_bytes   INT UNSIGNED NOT NULL,
+      data         MEDIUMBLOB NOT NULL,
+      uploaded_by  BIGINT UNSIGNED NOT NULL,
+      created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (file_id),
+      KEY idx_cfile_contract (contract_id),
+      CONSTRAINT fk_cfile_contract FOREIGN KEY (contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
+    ) ENGINE=InnoDB
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS partner_sync_logs (
       log_id        BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

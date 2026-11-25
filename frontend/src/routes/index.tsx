@@ -24,7 +24,6 @@ const RequisitionsPage = lazy(() => import('../pages/inventory/RequisitionsPage'
 
 const AdminDashboardPage = lazy(() => import('../pages/admin/AdminDashboardPage'));
 const UsersPage = lazy(() => import('../pages/admin/UsersPage'));
-const PartnersPage = lazy(() => import('../pages/admin/PartnersPage'));
 const MaterialsPage = lazy(() => import('../pages/inventory/MaterialsPage'));
 
 const UserDashboardPage = lazy(() => import('../pages/user/UserDashboardPage'));
@@ -68,7 +67,6 @@ export const router = createBrowserRouter([
             children: [
               { path: '/admin', element: L(<AdminDashboardPage />) },
               { path: '/admin/users', element: L(<UsersPage />) },
-              { path: '/admin/partners', element: L(<PartnersPage />) },
               { path: '/admin/materials', element: L(<MaterialsPage />) },
             ],
           },

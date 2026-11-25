@@ -4,7 +4,9 @@ import { pool, tx, nextCode } from '../db.js';
 import { HttpError, camel, requireRole } from '../http.js';
 import { COMPANY_CONTACT, assertStatus, cancelJob, loadJob, recordOwnerDecision, technicianContacts } from '../jobs.js';
 import { fetchBuildingOwnerByRef, fetchOwnerContact } from '../partnerClient.js';
-import { fetchRemoteVendor, handleIncomingRepairWebhook, pushJobStatusToPartner, syncPartnerJobs } from '../repairSync.js';
+import {
+  fetchRemoteVendor, getPartnerInbox, handleIncomingRepairWebhook, pushJobStatusToPartner, syncPartnerJobs,
+} from '../repairSync.js';
 import { WORK_SCOPES } from './jobs.js';
 
 export const router = Router();
@@ -31,6 +33,26 @@ router.get('/api/partners', requireRole('ADMIN'), async (_req, res) => {
     hasOutboundKey: Boolean(r.has_outbound_key),
     syncEnabled: Boolean(r.sync_enabled),
   })));
+});
+
+// กระดิ่งแจ้งเตือน: งานจากหอพักที่รอมอบหมาย (ต้องประกาศก่อน /api/partners/:id)
+router.get('/api/partners/inbox', requireRole('ADMIN'), async (_req, res) => {
+  const { partners, jobs } = await getPartnerInbox();
+  res.json({ partners: partners.map(camel), jobs: jobs.map(camel) });
+});
+
+// ดึงงานจากหอพักทุกรายทันที (ปุ่มในกระดิ่ง)
+router.post('/api/partners/sync-all', requireRole('ADMIN'), async (_req, res) => {
+  const { partners } = await getPartnerInbox();
+  const results = [];
+  for (const p of partners) {
+    try {
+      results.push({ partnerId: p.partner_id, ...(await syncPartnerJobs(p.partner_id, { manual: true })) });
+    } catch (err) {
+      results.push({ partnerId: p.partner_id, error: err.message });
+    }
+  }
+  res.json(results);
 });
 
 // คีย์และ secret แสดงครั้งเดียวตอนสร้าง (DB เก็บแค่ hash ของคีย์)

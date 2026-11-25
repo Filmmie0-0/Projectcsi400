@@ -97,18 +97,7 @@ app.get('/health', async (_req, res) => {
 });
 
 // ── Public (ผ่าน gateway: /api/auth/*) ──
-// สมัครเองได้เฉพาะ USER (ลูกค้า) ส่วนช่าง/แอดมินให้แอดมินสร้าง
-app.post('/api/auth/register', async (req, res) => {
-  const body = req.body ?? {};
-  validateNewUser(body);
-  jwtSecret();
-  const [r] = await pool.query(
-    'INSERT INTO users (email, password_hash, role, full_name, phone) VALUES (?, ?, ?, ?, ?)',
-    [body.email.trim().toLowerCase(), await bcrypt.hash(body.password, 12), 'USER', body.fullName.trim(), body.phone?.trim() || null],
-  );
-  res.status(201).json(issueSession(res, await findUser('u.user_id = ?', [r.insertId])));
-});
-
+// ไม่มีการสมัครเอง: บัญชีพาร์ทเนอร์ (USER) / ช่าง / แอดมิน สร้างโดยแอดมินผ่าน POST /api/users เท่านั้น
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body ?? {};
   if (typeof email !== 'string' || !email.trim() || email.length > 255 || typeof password !== 'string' || !password ||

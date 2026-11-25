@@ -34,8 +34,7 @@ npm run dev        # http://localhost:5173
 | Email | Password | Role |
 | --- | --- | --- |
 | admin@renocare.local | password123 | ADMIN |
-| owner@renocare.local | password123 | USER (เจ้าของหอ) |
-| partner@dormbook.local | password123 | USER (บัญชีตัวแทนระบบจอง DormBook) |
+| partner@dormbook.local | password123 | USER (บัญชีพาร์ทเนอร์ DormBook — งานเดโมทั้งหมดอยู่ในบัญชีนี้) |
 | tech1@renocare.local | password123 | TECHNICIAN (ช่างเอก — ก่อ ฉาบ ปูกระเบื้อง ทาสี) |
 | tech2@renocare.local | password123 | TECHNICIAN (ช่างบี — ไฟฟ้า ประปา แอร์) |
 
@@ -67,7 +66,7 @@ partner (API key)┴─> gateway :3000 ──┬─> auth-service      :4001 ─
 - logout หรือแอดมินระงับบัญชี → เพิ่ม `users.token_version` → token เดิมใช้ไม่ได้ทันที
 - request ที่เปลี่ยนข้อมูลจากเบราว์เซอร์ต้องมี Origin ตรงกับ `CORS_ORIGIN` (กัน CSRF)
 - จำกัด login ล้มเหลว 10 ครั้ง/IP/15 นาที, สมัครสมาชิก 5 ครั้ง/IP/ชั่วโมง; รหัสผ่าน bcrypt ยาว 8-72 ไบต์
-- สมัครเองได้เฉพาะลูกค้า (USER); ช่างและแอดมินสร้างโดยแอดมินในหน้า "ผู้ใช้ & ช่าง"
+- ไม่มีการสมัครเอง: บัญชีพาร์ทเนอร์ (USER) สร้างพร้อมกันตอนเพิ่มพาร์ทเนอร์ในหน้า "พาร์ทเนอร์ API" ส่วนช่างและแอดมินสร้างในหน้า "ผู้ใช้ & ช่าง"
 - `/api/partner/v1/*` ใช้ `X-API-Key` (เก็บแค่ SHA-256 ใน DB) แทน cookie
 - ยังไม่มีระบบยืนยันอีเมล/รีเซ็ตรหัสผ่าน
 

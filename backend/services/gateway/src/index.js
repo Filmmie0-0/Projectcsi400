@@ -22,7 +22,7 @@ const routes = [
   { prefixes: ['/api/materials', '/api/stock', '/api/requisitions'], target: INVENTORY },
 ];
 
-const PUBLIC_POST = ['/api/auth/login', '/api/auth/register', '/api/auth/logout'];
+const PUBLIC_POST = ['/api/auth/login', '/api/auth/logout'];
 const PUBLIC_GET = ['/api/mock-partner/events'];
 
 const app = express();
@@ -35,15 +35,6 @@ const loginLimiter = rateLimit({
   message: { code: 'RATE_LIMITED', message: 'พยายามเข้าสู่ระบบมากเกินไป กรุณารอสักครู่แล้วลองใหม่' },
   skipSuccessfulRequests: true,
 });
-const registerLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  limit: 5,
-  standardHeaders: 'draft-8',
-  legacyHeaders: false,
-  message: { code: 'RATE_LIMITED', message: 'สมัครสมาชิกบ่อยเกินไป กรุณาลองใหม่ภายหลัง' },
-  skipFailedRequests: true,
-});
-
 app.use((req, res, next) => {
   const reqOrigin = req.get('origin');
   res.setHeader('Access-Control-Allow-Origin', CORS_ORIGINS.includes(reqOrigin) ? reqOrigin : CORS_ORIGINS[0]);
@@ -60,7 +51,6 @@ app.use((req, res, next) => {
 });
 
 app.use('/api/auth/login', loginLimiter);
-app.use('/api/auth/register', registerLimiter);
 
 app.get('/health', async (_req, res) => {
   const services = { auth: AUTH, job: JOB, inventory: INVENTORY };

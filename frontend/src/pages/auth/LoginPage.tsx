@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import { ErrorText } from '../../components/common/QueryState';
@@ -44,7 +44,7 @@ export default function LoginPage() {
         <Button className="w-full" disabled={loading}>{loading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}</Button>
       </form>
       <p className="border-t border-line pt-4 text-center text-sm text-espresso-500">
-        ยังไม่มีบัญชี? <Link to="/register" className="font-medium text-walnut-600 hover:underline">สมัครเป็นลูกค้า</Link>
+        บัญชีพาร์ทเนอร์ออกให้โดยผู้ดูแลระบบ RenoCare
       </p>
     </div>
   );

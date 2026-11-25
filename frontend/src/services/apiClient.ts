@@ -13,7 +13,7 @@ apiClient.interceptors.response.use(
   (err) => {
     const apiError = toApiError(err);
     const url: string = err.config?.url ?? '';
-    if (apiError.status === 401 && !/\/auth\/(login|register|logout)$/.test(url)) useAuthStore.getState().logout();
+    if (apiError.status === 401 && !/\/auth\/(login|logout)$/.test(url)) useAuthStore.getState().logout();
     return Promise.reject(apiError);
   },
 );

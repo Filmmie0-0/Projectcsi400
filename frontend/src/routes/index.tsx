@@ -14,7 +14,6 @@ const L = (el: ReactElement) => (
 const LandingPage = lazy(() => import('../pages/public/LandingPage'));
 const PartnerSandboxPage = lazy(() => import('../pages/public/PartnerSandboxPage'));
 const LoginPage = lazy(() => import('../pages/auth/LoginPage'));
-const RegisterPage = lazy(() => import('../pages/auth/RegisterPage'));
 
 // หน้าที่ใช้ร่วมกันหลาย role (เนื้อหาเปลี่ยนตาม role)
 const JobListPage = lazy(() => import('../pages/jobs/JobListPage'));
@@ -28,7 +27,6 @@ const PartnersPage = lazy(() => import('../pages/admin/PartnersPage'));
 const MaterialsPage = lazy(() => import('../pages/inventory/MaterialsPage'));
 
 const UserDashboardPage = lazy(() => import('../pages/user/UserDashboardPage'));
-const NewJobPage = lazy(() => import('../pages/user/NewJobPage'));
 
 const TechDashboardPage = lazy(() => import('../pages/technician/TechDashboardPage'));
 
@@ -44,7 +42,6 @@ export const router = createBrowserRouter([
     element: <AuthLayout />,
     children: [
       { path: '/login', element: L(<LoginPage />) },
-      { path: '/register', element: L(<RegisterPage />) },
     ],
   },
   {
@@ -76,7 +73,6 @@ export const router = createBrowserRouter([
             element: <RoleRoute allow={['USER']} />,
             children: [
               { path: '/user', element: L(<UserDashboardPage />) },
-              { path: '/user/jobs/new', element: L(<NewJobPage />) },
             ],
           },
           {

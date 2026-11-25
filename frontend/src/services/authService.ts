@@ -4,8 +4,6 @@ import type { AuthResponse, User, UserInput } from '../types/user';
 // auth-service: /api/auth/*, /api/users/*
 export const authService = {
   login: (email: string, password: string) => data(apiClient.post<AuthResponse>('/auth/login', { email, password })),
-  register: (body: { email: string; password: string; fullName: string; phone: string }) =>
-    data(apiClient.post<AuthResponse>('/auth/register', body)),
   logout: () => apiClient.post('/auth/logout').then(() => null),
   me: () => data(apiClient.get<User>('/auth/me')),
 

@@ -1,4 +1,4 @@
-// ADMIN = ผู้ดูแล/รับงาน, USER = ลูกค้า (เจ้าของตึก หรือบัญชีตัวแทนระบบพาร์ทเนอร์), TECHNICIAN = ช่าง
+// ADMIN = ผู้ดูแล/รับงาน, USER = บัญชีพาร์ทเนอร์ (1 บัญชีต่อ 1 พาร์ทเนอร์ ใช้เซ็นสัญญา/ชำระเงินของงานที่พาร์ทเนอร์ส่งมา), TECHNICIAN = ช่าง
 export type Role = 'ADMIN' | 'USER' | 'TECHNICIAN';
 
 export interface User {

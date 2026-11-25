@@ -1,5 +1,5 @@
 import {
-  LayoutDashboard, Users, ClipboardList, FileSignature, PackageOpen, Boxes, PlugZap, PlusCircle, HardHat, type LucideIcon,
+  LayoutDashboard, Users, ClipboardList, FileSignature, PackageOpen, Boxes, PlugZap, HardHat, type LucideIcon,
 } from 'lucide-react';
 import type { Role } from '../../types/user';
 
@@ -17,7 +17,6 @@ export const MENUS: Record<Role, MenuItem[]> = {
   ],
   USER: [
     { label: 'ภาพรวม', to: '/user', icon: LayoutDashboard },
-    { label: 'แจ้งงานใหม่', to: '/user/jobs/new', icon: PlusCircle },
     { label: 'งานของฉัน', to: '/jobs', icon: ClipboardList },
     { label: 'สัญญา & การชำระเงิน', to: '/billing', icon: FileSignature },
   ],
@@ -30,7 +29,7 @@ export const MENUS: Record<Role, MenuItem[]> = {
 
 export const ROLE_LABEL: Record<Role, string> = {
   ADMIN: 'ผู้ดูแลระบบ',
-  USER: 'ลูกค้า',
+  USER: 'พาร์ทเนอร์',
   TECHNICIAN: 'ช่าง',
 };
 

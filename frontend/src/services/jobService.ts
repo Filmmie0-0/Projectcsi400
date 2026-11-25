@@ -1,18 +1,14 @@
 import { apiClient, data } from './apiClient';
 import type {
-  AdminSummary, Building, Contract, ContractInput, Invoice, JobDetail, JobInput, JobListItem, SurveyInput, UnitInput, WorkLogInput,
+  AdminSummary, Building, Contract, ContractInput, Invoice, JobDetail, JobListItem, SurveyInput, WorkLogInput,
 } from '../types/job';
 
 // job-service: /api/buildings, /api/jobs, /api/contracts, /api/invoices
 export const jobService = {
   listBuildings: () => data(apiClient.get<Building[]>('/buildings')),
-  createBuilding: (body: { name: string; address: string; units: UnitInput[] }) =>
-    data(apiClient.post<{ buildingId: number }>('/buildings', body)),
-  addUnit: (buildingId: number, body: UnitInput) => data(apiClient.post<{ unitId: number }>(`/buildings/${buildingId}/units`, body)),
 
   listJobs: (params?: { status?: string; type?: string }) => data(apiClient.get<JobListItem[]>('/jobs', { params })),
   getJob: (id: number) => data(apiClient.get<JobDetail>(`/jobs/${id}`)),
-  createJob: (body: JobInput) => data(apiClient.post<{ jobId: number; jobCode: string }>('/jobs', body)),
   assign: (id: number, body: { technicianIds: number[]; leadId: number; scheduledDate?: string }) =>
     data(apiClient.post<JobDetail>(`/jobs/${id}/assign`, body)),
   submitSurvey: (id: number, body: SurveyInput) => data(apiClient.post<JobDetail>(`/jobs/${id}/surveys`, body)),

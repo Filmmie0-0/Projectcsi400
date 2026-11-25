@@ -28,13 +28,6 @@ export interface Building {
   units: Unit[];
 }
 
-export interface UnitInput {
-  unitType: UnitType;
-  code: string;
-  floor?: string;
-  sizeSqm?: number;
-}
-
 export interface JobListItem {
   jobId: number;
   jobCode: string;
@@ -231,17 +224,6 @@ export interface JobDetail {
   contracts: Contract[];
   workLogs: WorkLog[];
   statusLogs: StatusLog[];
-}
-
-export interface JobInput {
-  unitId: number;
-  jobType: JobType;
-  title: string;
-  description?: string;
-  priority: Priority;
-  preferredDate?: string;
-  contactName?: string;
-  contactPhone?: string;
 }
 
 export interface SurveyInput {

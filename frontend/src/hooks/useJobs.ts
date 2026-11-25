@@ -25,9 +25,6 @@ export const useAdminSummary = () => useQuery({ queryKey: jobKeys.summary, query
 type Msg = string | ((args: never[]) => string);
 const S = jobService;
 const SUCCESS = new Map<unknown, Msg>([
-  [S.createBuilding, 'เพิ่มอาคารแล้ว'],
-  [S.addUnit, 'เพิ่มห้อง/พื้นที่แล้ว'],
-  [S.createJob, 'แจ้งงานเรียบร้อย'],
   [S.assign, 'บันทึกทีมช่างแล้ว'],
   [S.submitSurvey, 'ส่งผลประเมินแล้ว'],
   [S.start, 'เริ่มงานแล้ว'],

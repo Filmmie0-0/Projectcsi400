@@ -218,12 +218,12 @@ router.post('/api/jobs/:id/surveys', requireRole('TECHNICIAN'), async (req, res)
   res.status(201).json(await getJobDetail(Number(req.params.id)));
 });
 
-// หัวหน้าช่าง/แอดมินเริ่มงานหลังลูกค้าเซ็นสัญญา
-router.post('/api/jobs/:id/start', requireRole('ADMIN', 'TECHNICIAN'), async (req, res) => {
+// หัวหน้าช่างของงานเท่านั้นที่เริ่มงานได้ (หลังลูกค้าเซ็นสัญญา)
+router.post('/api/jobs/:id/start', requireRole('TECHNICIAN'), async (req, res) => {
   const user = currentUser(req);
   await tx(user.id, async (conn) => {
     const job = await loadJob(conn, req.params.id, { lock: true });
-    await assertLeadOrAdmin(conn, job, user);
+    await assertLead(conn, job, user);
     assertStatus(job, 'CONTRACTED');
     assertOwnerApproved(job);
     await moveStatus(conn, job, 'IN_PROGRESS');
@@ -250,17 +250,19 @@ router.post('/api/jobs/:id/work-logs', requireRole('TECHNICIAN'), async (req, re
   res.status(201).json(await getJobDetail(Number(req.params.id)));
 });
 
-// ปิดงาน: งานซ่อม/รีโนเวทที่ทำเสร็จ หรือแอดมินปิดงานตรวจห้องที่ลูกค้าไม่ต้องการซ่อม
+// ปิดงาน: หัวหน้าช่างส่งมอบงานที่ทำเสร็จ หรือแอดมินปิดงานที่ประเมินแล้วไม่ต้องซ่อม
 router.post('/api/jobs/:id/complete', requireRole('ADMIN', 'TECHNICIAN'), async (req, res) => {
   const user = currentUser(req);
   await tx(user.id, async (conn) => {
     const job = await loadJob(conn, req.params.id, { lock: true });
-    await assertLeadOrAdmin(conn, job, user);
     // ประเมินแล้วแต่ไม่ทำสัญญา (ไม่ต้องซ่อม/ลูกค้าไม่ซ่อม): แอดมินปิดงานได้ทุกประเภท
-    if (job.status === 'SURVEYED' && user.role === 'ADMIN') {
+    if (user.role === 'ADMIN') {
+      assertStatus(job, 'SURVEYED');
       await moveStatus(conn, job, 'COMPLETED', req.body.remark || 'ประเมินแล้ว ไม่มีงานซ่อม');
       return;
     }
+    // ส่งมอบงานที่ทำเสร็จ: หัวหน้าช่างของงานเท่านั้น
+    await assertLead(conn, job, user);
     assertStatus(job, 'IN_PROGRESS');
     const [[pending]] = await conn.query(
       `SELECT COUNT(*) AS n FROM contracts WHERE job_id = ? AND status IN ('DRAFT','SENT')`, [job.job_id]);
@@ -324,8 +326,7 @@ export async function cancelJob(conn, job, reason) {
   await moveStatus(conn, job, 'CANCELLED', reason);
 }
 
-async function assertLeadOrAdmin(conn, job, user) {
-  if (user.role === 'ADMIN') return;
+async function assertLead(conn, job, user) {
   const a = await assignment(conn, job.job_id, user.id);
   if (!a?.is_lead) throw new HttpError(403, 'FORBIDDEN', 'เฉพาะหัวหน้าช่างของงานนี้');
 }

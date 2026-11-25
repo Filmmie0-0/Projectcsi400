@@ -89,10 +89,10 @@ function Actions({ job }: { job: JobDetail }) {
         {job.status === 'NEW' ? 'มอบหมายช่าง & นัดประเมิน' : 'ปรับทีมช่าง'}
       </Button>
     ),
-    (isAdmin || isLead) && job.status === 'CONTRACTED' && (
+    isLead && job.status === 'CONTRACTED' && (
       <Button key="start" onClick={() => start.mutate([job.jobId])} disabled={start.isPending}>เริ่มงาน</Button>
     ),
-    (isAdmin || isLead) && job.status === 'IN_PROGRESS' && (
+    isLead && job.status === 'IN_PROGRESS' && (
       <Button
         key="complete"
         onClick={async () => (await confirmDialog({ title: 'ส่งมอบงาน / ปิดงาน?', message: `ยืนยันว่างาน ${job.jobCode} เสร็จเรียบร้อยและส่งมอบให้ลูกค้าแล้ว`, confirmText: 'ส่งมอบงาน' })) && complete.mutate([job.jobId])}
@@ -153,8 +153,8 @@ function nextStepHint(job: JobDetail, role: string) {
     SURVEY_ASSIGNED: { TECHNICIAN: 'เข้าหน้างานตามนัดแล้วบันทึกผลประเมิน', ADMIN: 'รอช่างส่งผลประเมิน', USER: 'ช่างจะเข้าประเมินตามวันนัด' },
     SURVEYED: { ADMIN: 'ร่างสัญญาจากผลประเมินแล้วส่งให้ลูกค้า', USER: 'รอแอดมินส่งสัญญา', TECHNICIAN: 'รอทำสัญญา' },
     QUOTED: { USER: 'ตรวจสอบและลงนามสัญญา', ADMIN: 'รอลูกค้าลงนาม', TECHNICIAN: 'รอลูกค้าลงนาม' },
-    CONTRACTED: { TECHNICIAN: 'เบิกวัสดุแล้วกดเริ่มงาน (หัวหน้าช่าง)', ADMIN: 'รอช่างเริ่มงาน', USER: 'ชำระงวดแรกตามสัญญา' },
-    IN_PROGRESS: { TECHNICIAN: 'บันทึกงานรายวัน พบงานเพิ่มให้กด "แจ้งงานเพิ่ม"', ADMIN: 'ติดตามความคืบหน้า อนุมัติใบเบิก', USER: 'ติดตามความคืบหน้า' },
+    CONTRACTED: { TECHNICIAN: 'เบิกวัสดุแล้วกดเริ่มงาน (หัวหน้าช่าง)', ADMIN: 'รอหัวหน้าช่างเริ่มงาน', USER: 'ชำระงวดแรกตามสัญญา' },
+    IN_PROGRESS: { TECHNICIAN: 'บันทึกงานรายวัน พบงานเพิ่มให้กด "แจ้งงานเพิ่ม"', ADMIN: 'ติดตามความคืบหน้า อนุมัติใบเบิก (หัวหน้าช่างเป็นคนส่งมอบงาน)', USER: 'ติดตามความคืบหน้า' },
   };
   return hints[job.status]?.[role] ?? JOB_STATUS[job.status].label;
 }

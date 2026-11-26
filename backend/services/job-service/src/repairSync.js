@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { pool, tx, nextCode } from './db.js';
 import { HttpError } from './http.js';
-import { cancelJob, loadJob } from './jobs.js';
+import { buildInstallments, cancelJob, loadJob, markContractRejected, markContractSigned } from './jobs.js';
 import { fetchOwnerContact } from './partnerClient.js';
 
 // ───────────── เชื่อมต่อ Repair API v1 ของระบบหอพักพาร์ทเนอร์ (เช่น backend.ayasakimioweb.com) ─────────────
@@ -609,6 +609,166 @@ export async function pushJobStatusToPartner(jobId, opts = {}) {
   }
 }
 
+// ───────────── สัญญาซ่อม ↔ หอพัก (docs/dorm-contract-api-request.md) ─────────────
+// PUT /jobs/:id/contracts/:contract_no ส่งสัญญาให้หอพักอนุมัติ, GET /jobs/:id/contracts ดึงผลกลับ
+const PARTNER_FILE_TYPES = new Set(['application/pdf', 'image/png', 'image/jpeg']);
+const round2 = (n) => Math.round(Number(n) * 100) / 100;
+
+async function loadPartnerContract(contractId) {
+  const [[row]] = await pool.query(
+    `SELECT c.*, j.remote_job_id, j.job_id AS j_id, p.partner_id AS p_id, p.name AS p_name, p.integration_mode,
+            p.api_base_url, p.outbound_api_key, pc.contract_no AS parent_contract_no
+     FROM contracts c
+     JOIN jobs j ON j.job_id = c.job_id
+     JOIN partners p ON p.partner_id = j.partner_id
+     LEFT JOIN contracts pc ON pc.contract_id = c.parent_contract_id
+     WHERE c.contract_id = ?`,
+    [contractId],
+  );
+  if (!row || row.integration_mode !== 'REPAIR_API_V1' || !row.remote_job_id) return null;
+  return { contract: row, partner: { ...row, partner_id: row.p_id, name: row.p_name } };
+}
+
+async function buildContractBody(c) {
+  const [items] = await pool.query(
+    'SELECT description, qty, unit, unit_price FROM contract_items WHERE contract_id = ? ORDER BY item_id',
+    [c.contract_id],
+  );
+  const [files] = await pool.query(
+    `SELECT file_name, mime_type, data FROM contract_files WHERE contract_id = ? AND kind = 'CONTRACT' ORDER BY file_id LIMIT 5`,
+    [c.contract_id],
+  );
+  return {
+    contract_type: c.contract_type === 'ADDENDUM' ? 'addendum' : 'main',
+    parent_contract_no: c.parent_contract_no ?? null,
+    billing_type: c.billing_type === 'MONTHLY' ? 'monthly' : 'daily',
+    rate: round2(c.rate),
+    period_qty: Number(c.period_qty),
+    start_date: String(c.start_date).slice(0, 10),
+    end_date: String(c.end_date).slice(0, 10),
+    labor_amount: round2(c.labor_amount),
+    material_amount: round2(c.material_amount),
+    total_amount: round2(c.total_amount),
+    terms: c.terms ? String(c.terms).slice(0, 2000) : null,
+    items: items.map((i) => ({
+      description: String(i.description).slice(0, 200), qty: Number(i.qty), unit: i.unit, unit_price: round2(i.unit_price),
+    })),
+    installments: buildInstallments(c).map((v, idx) => ({
+      no: idx + 1, description: v.description, due_date: v.dueDate, amount: round2(v.amount),
+    })),
+    files: files
+      .filter((f) => PARTNER_FILE_TYPES.has(f.mime_type))
+      .map((f) => ({ file_name: f.file_name, mime_type: f.mime_type, data_base64: Buffer.from(f.data).toString('base64') })),
+  };
+}
+
+async function setJobSyncError(jobId, message) {
+  await pool.query('UPDATE jobs SET remote_sync_error = ? WHERE job_id = ?', [message ? String(message).slice(0, 500) : null, jobId]);
+}
+
+export async function pushContractToPartner(contractId) {
+  const loaded = await loadPartnerContract(contractId);
+  if (!loaded) return null;
+  const { contract: c, partner } = loaded;
+  const path = `/jobs/${c.remote_job_id}/contracts/${encodeURIComponent(c.contract_no)}`;
+  try {
+    const body = await buildContractBody(c);
+    const { status: httpStatus, data } = await callRepairApi(partner, 'PUT', path, body);
+    const remoteStatus = String(data?.status ?? data?.contract?.status ?? 'pending');
+    await pool.query('UPDATE contracts SET remote_status = ?, remote_synced_at = NOW() WHERE contract_id = ?', [remoteStatus, c.contract_id]);
+    await setJobSyncError(c.j_id, null);
+    await logSync(partner.partner_id, {
+      jobId: c.j_id, remoteJobId: c.remote_job_id, direction: 'OUTBOUND_CONTRACT',
+      action: `PUT ${path}`, status: 'OK', httpStatus,
+      detail: { ...body, files: body.files.map((f) => f.file_name) },
+    });
+    return { ok: true, remoteStatus };
+  } catch (err) {
+    const msg = `ส่งสัญญา ${c.contract_no} ให้หอพักไม่สำเร็จ: ${err.message}`;
+    await setJobSyncError(c.j_id, msg);
+    await logSync(partner.partner_id, {
+      jobId: c.j_id, remoteJobId: c.remote_job_id, direction: 'OUTBOUND_CONTRACT',
+      action: `PUT ${path}`, status: 'ERROR', httpStatus: err.httpStatus || null, errorMessage: msg,
+    });
+    return { ok: false, message: msg };
+  }
+}
+
+// ผลอนุมัติจากหอพัก: approved = ลงนามแทนลูกค้า (สร้างงวดชำระ), rejected = ปฏิเสธสัญญา
+async function applyRemoteContractDecision(local, remote, partner) {
+  const remoteStatus = String(remote.status ?? '');
+  if (remoteStatus === local.remote_status) return;
+  await tx(null, async (conn) => {
+    const [[c]] = await conn.query('SELECT * FROM contracts WHERE contract_id = ? FOR UPDATE', [local.contract_id]);
+    await conn.query('UPDATE contracts SET remote_status = ?, remote_synced_at = NOW() WHERE contract_id = ?', [remoteStatus, c.contract_id]);
+    if (c.status !== 'SENT') return;
+    const job = await loadJob(conn, c.job_id, { lock: true });
+    const who = remote.decided_by_name ? String(remote.decided_by_name).slice(0, 150) : partner.name;
+    if (remoteStatus === 'approved') {
+      await markContractSigned(conn, c, job, { signedBy: null, signedName: `${who} (${partner.name})`.slice(0, 150) });
+    } else if (remoteStatus === 'rejected') {
+      const reason = remote.decision_note ? `หอพักไม่อนุมัติ: ${remote.decision_note}` : 'หอพักไม่อนุมัติ';
+      await markContractRejected(conn, c, job, reason.slice(0, 500));
+    }
+  });
+  await logSync(partner.partner_id, {
+    jobId: local.job_id, remoteJobId: local.remote_job_id, direction: 'INBOUND_CONTRACT',
+    action: `contract ${local.contract_no}: ${local.remote_status ?? '-'} → ${remoteStatus}`, status: 'OK',
+    detail: { decided_by_name: remote.decided_by_name ?? null, decision_note: remote.decision_note ?? null },
+  });
+}
+
+export async function syncPartnerContracts(partnerId) {
+  const [[partner]] = await pool.query('SELECT * FROM partners WHERE partner_id = ?', [partnerId]);
+  if (!partner) return;
+  const [rows] = await pool.query(
+    `SELECT c.contract_id, c.contract_no, c.status, c.remote_status, j.job_id, j.remote_job_id
+     FROM contracts c JOIN jobs j ON j.job_id = c.job_id
+     WHERE j.partner_id = ? AND j.remote_job_id IS NOT NULL
+       AND (c.status = 'SENT' OR (c.status = 'CANCELLED' AND c.remote_status = 'pending'))`,
+    [partnerId],
+  );
+
+  // ส่งซ้ำสัญญาที่ยังส่งไม่สำเร็จ
+  for (const r of rows.filter((x) => x.status === 'SENT' && !x.remote_status)) await pushContractToPartner(r.contract_id);
+
+  // สัญญาที่ฝั่งเรายกเลิก (เช่น ยกเลิกงาน) แต่หอพักยังรออนุมัติอยู่
+  for (const r of rows.filter((x) => x.status === 'CANCELLED')) {
+    const path = `/jobs/${r.remote_job_id}/contracts/${encodeURIComponent(r.contract_no)}/cancel`;
+    try {
+      await callRepairApi(partner, 'POST', path, { reason: 'ยกเลิกสัญญาโดย RenoCare' });
+      await pool.query(`UPDATE contracts SET remote_status = 'cancelled', remote_synced_at = NOW() WHERE contract_id = ?`, [r.contract_id]);
+      await logSync(partnerId, { jobId: r.job_id, remoteJobId: r.remote_job_id, direction: 'OUTBOUND_CONTRACT', action: `POST ${path}`, status: 'OK' });
+    } catch (err) {
+      if (err.httpStatus === 409 || err.httpStatus === 404) {
+        await pool.query('UPDATE contracts SET remote_status = NULL WHERE contract_id = ?', [r.contract_id]);
+      }
+      await logSync(partnerId, {
+        jobId: r.job_id, remoteJobId: r.remote_job_id, direction: 'OUTBOUND_CONTRACT', action: `POST ${path}`,
+        status: 'ERROR', httpStatus: err.httpStatus || null, errorMessage: err.message,
+      });
+    }
+  }
+
+  // ดึงผลอนุมัติของสัญญาที่รออยู่ (เรียก 1 ครั้งต่องาน)
+  const waiting = rows.filter((x) => x.status === 'SENT' && x.remote_status);
+  for (const remoteJobId of new Set(waiting.map((x) => x.remote_job_id))) {
+    try {
+      const { data } = await callRepairApi(partner, 'GET', `/jobs/${remoteJobId}/contracts`);
+      const remoteList = Array.isArray(data?.contracts) ? data.contracts : [];
+      for (const local of waiting.filter((x) => x.remote_job_id === remoteJobId)) {
+        const remote = remoteList.find((rc) => rc.contract_no === local.contract_no);
+        if (remote) await applyRemoteContractDecision(local, remote, partner);
+      }
+    } catch (err) {
+      await logSync(partnerId, {
+        remoteJobId, direction: 'INBOUND_CONTRACT', action: `GET /jobs/${remoteJobId}/contracts`,
+        status: 'ERROR', httpStatus: err.httpStatus || null, errorMessage: err.message,
+      });
+    }
+  }
+}
+
 // ตั้งค่าการเชื่อมต่อระบบหอพักของเพื่อนจาก env (DORM_API_BASE_URL + DORM_API_KEY) ตอน service เริ่มทำงาน
 // ใช้แถวพาร์ทเนอร์เดิมที่ชี้ไป base URL เดียวกัน (หรือแถวแรกถ้ายังไม่มี) แล้วสลับเป็นโหมด Repair API v1
 export async function configureDormPartnerFromEnv() {
@@ -683,6 +843,7 @@ export function startRepairSyncWorker(intervalMs = Number(process.env.REPAIR_SYN
       );
       for (const p of partners) {
         await syncPartnerJobs(p.partner_id);
+        await syncPartnerContracts(p.partner_id);
       }
     } catch (err) {
       console.error('repair sync worker:', err.message);

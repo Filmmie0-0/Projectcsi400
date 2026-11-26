@@ -5,7 +5,7 @@ import { HttpError, camel, requireRole } from '../http.js';
 import { COMPANY_CONTACT, assertStatus, cancelJob, loadJob, recordOwnerDecision, technicianContacts } from '../jobs.js';
 import { fetchBuildingOwnerByRef, fetchOwnerContact } from '../partnerClient.js';
 import {
-  fetchRemoteVendor, getPartnerInbox, handleIncomingRepairWebhook, pushJobStatusToPartner, syncPartnerJobs,
+  fetchRemoteVendor, getPartnerInbox, handleIncomingRepairWebhook, pushJobStatusToPartner, syncPartnerContracts, syncPartnerJobs,
 } from '../repairSync.js';
 import { WORK_SCOPES } from './jobs.js';
 
@@ -48,6 +48,7 @@ router.post('/api/partners/sync-all', requireRole('ADMIN'), async (_req, res) =>
   for (const p of partners) {
     try {
       results.push({ partnerId: p.partner_id, ...(await syncPartnerJobs(p.partner_id, { manual: true })) });
+      await syncPartnerContracts(p.partner_id);
     } catch (err) {
       results.push({ partnerId: p.partner_id, error: err.message });
     }

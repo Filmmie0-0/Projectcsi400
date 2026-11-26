@@ -1,7 +1,10 @@
 import express, { Router } from 'express';
 import { pool, tx, nextCode } from '../db.js';
 import { HttpError, camel, currentUser, requireRole } from '../http.js';
-import { assertOwnerApproved, assertStatus, buildInstallments, enqueueWebhook, getJobDetail, loadJob, moveStatus } from '../jobs.js';
+import {
+  assertOwnerApproved, assertStatus, enqueueWebhook, getJobDetail, loadJob, markContractRejected, markContractSigned, moveStatus,
+} from '../jobs.js';
+import { pushContractToPartner } from '../repairSync.js';
 
 export const router = Router();
 
@@ -159,6 +162,8 @@ router.post('/api/contracts/:id/send', requireRole('ADMIN'), async (req, res) =>
     if (c.contract_type === 'MAIN') await moveStatus(conn, job, 'QUOTED', `ส่งสัญญา ${c.contract_no}`);
     return job.job_id;
   });
+  // งานจากหอพัก (Repair API v1): ส่งสัญญาไปให้หอพักอนุมัติ — ไม่สำเร็จจะแสดงใน remote_sync_error และ worker ส่งซ้ำให้
+  await pushContractToPartner(Number(req.params.id));
   res.json(await getJobDetail(jobId));
 });
 
@@ -173,19 +178,8 @@ router.post('/api/contracts/:id/sign', requireRole('USER'), rawFile, async (req,
     const job = await loadJob(conn, c.job_id, { lock: true });
     if (job.requester_id !== user.id) throw new HttpError(404, 'NOT_FOUND', 'ไม่พบสัญญา');
     await insertFile(conn, c.contract_id, 'SIGNED', file, user.id);
-    await conn.query(
-      `UPDATE contracts SET status = 'SIGNED', signed_by = ?, signed_name = ?, signed_at = NOW() WHERE contract_id = ?`,
-      [user.id, signedName, c.contract_id],
-    );
-    const installments = buildInstallments(c);
-    for (const [i, v] of installments.entries()) {
-      await conn.query(
-        'INSERT INTO invoices (invoice_no, contract_id, installment_no, description, due_date, amount) VALUES (?, ?, ?, ?, ?, ?)',
-        [`IV${c.contract_no.slice(2)}-${i + 1}`, c.contract_id, i + 1, v.description, v.dueDate, v.amount],
-      );
-    }
     await enqueueWebhook(conn, job, 'contract.signed', { ...contractPayload(c), signedName });
-    if (c.contract_type === 'MAIN') await moveStatus(conn, job, 'CONTRACTED', `เซ็นสัญญา ${c.contract_no}`);
+    await markContractSigned(conn, c, job, { signedBy: user.id, signedName });
     return job.job_id;
   });
   res.json(await getJobDetail(jobId));
@@ -198,9 +192,7 @@ router.post('/api/contracts/:id/reject', requireRole('USER'), async (req, res) =
     const c = await loadContract(conn, req.params.id, 'SENT');
     const job = await loadJob(conn, c.job_id, { lock: true });
     if (job.requester_id !== user.id) throw new HttpError(404, 'NOT_FOUND', 'ไม่พบสัญญา');
-    const reason = req.body.reason?.trim() || null;
-    await conn.query(`UPDATE contracts SET status = 'REJECTED', reject_reason = ? WHERE contract_id = ?`, [reason, c.contract_id]);
-    if (c.contract_type === 'MAIN') await moveStatus(conn, job, 'SURVEYED', `ปฏิเสธสัญญา ${c.contract_no}${reason ? `: ${reason}` : ''}`);
+    await markContractRejected(conn, c, job, req.body.reason?.trim() || null);
     return job.job_id;
   });
   res.json(await getJobDetail(jobId));

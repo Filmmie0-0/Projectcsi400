@@ -73,6 +73,12 @@ export async function ensureSchema() {
     ['remote_payload', 'JSON NULL AFTER remote_sync_error'],
   ]);
 
+  // สถานะสัญญาฝั่งหอพัก (Repair API v1): NULL = ยังไม่ได้ส่ง/ส่งไม่สำเร็จ, pending/approved/rejected/cancelled = ตามหอพัก
+  await addMissingColumns('contracts', [
+    ['remote_status', 'VARCHAR(20) NULL AFTER reject_reason'],
+    ['remote_synced_at', 'TIMESTAMP NULL AFTER remote_status'],
+  ]);
+
   const [indexes] = await pool.query(
     `SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'jobs' AND INDEX_NAME = 'uq_job_remote'`,
   );
@@ -116,4 +122,8 @@ export async function ensureSchema() {
       CONSTRAINT fk_pslog_partner FOREIGN KEY (partner_id) REFERENCES partners(partner_id) ON DELETE CASCADE
     ) ENGINE=InnoDB
   `);
+  await pool.query(
+    `ALTER TABLE partner_sync_logs MODIFY direction
+       ENUM('INBOUND_POLL','INBOUND_WEBHOOK','OUTBOUND_STATUS','OUTBOUND_VENDOR','OUTBOUND_OWNER','OUTBOUND_CONTRACT','INBOUND_CONTRACT') NOT NULL`,
+  );
 }

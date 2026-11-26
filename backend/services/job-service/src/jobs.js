@@ -128,6 +128,29 @@ export async function getJobDetail(jobId) {
   };
 }
 
+// สัญญาถูกลงนาม (ลูกค้าเซ็นในระบบเรา หรือหอพักอนุมัติผ่าน Repair API) → สร้างงวดชำระ, สัญญาหลักทำให้งานเป็น CONTRACTED
+export async function markContractSigned(conn, c, job, { signedBy = null, signedName }) {
+  await conn.query(
+    `UPDATE contracts SET status = 'SIGNED', signed_by = ?, signed_name = ?, signed_at = NOW() WHERE contract_id = ?`,
+    [signedBy, signedName, c.contract_id],
+  );
+  for (const [i, v] of buildInstallments(c).entries()) {
+    await conn.query(
+      'INSERT INTO invoices (invoice_no, contract_id, installment_no, description, due_date, amount) VALUES (?, ?, ?, ?, ?, ?)',
+      [`IV${c.contract_no.slice(2)}-${i + 1}`, c.contract_id, i + 1, v.description, v.dueDate, v.amount],
+    );
+  }
+  if (c.contract_type === 'MAIN') await moveStatus(conn, job, 'CONTRACTED', `เซ็นสัญญา ${c.contract_no}`);
+}
+
+// สัญญาถูกปฏิเสธ: สัญญาหลักทำให้งานกลับไป SURVEYED ให้แอดมินเสนอใหม่
+export async function markContractRejected(conn, c, job, reason) {
+  await conn.query(`UPDATE contracts SET status = 'REJECTED', reject_reason = ? WHERE contract_id = ?`, [reason, c.contract_id]);
+  if (c.contract_type === 'MAIN') {
+    await moveStatus(conn, job, 'SURVEYED', `ปฏิเสธสัญญา ${c.contract_no}${reason ? `: ${reason}` : ''}`);
+  }
+}
+
 // ยอดงวดตามประเภทสัญญา: DAILY = มัดจำ 30% + ส่วนที่เหลือเมื่อจบงาน, MONTHLY = งวดละเดือน งวดแรกรวมค่าวัสดุ
 export function buildInstallments(c) {
   const addMonths = (iso, n) => {

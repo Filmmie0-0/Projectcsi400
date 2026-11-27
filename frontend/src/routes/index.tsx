@@ -1,17 +1,17 @@
 import { lazy, Suspense } from 'react';
 import type { ReactElement } from 'react';
-import { createBrowserRouter } from 'react-router-dom';
+import { createBrowserRouter, Navigate } from 'react-router-dom';
 import PublicLayout from '../layouts/PublicLayout';
 import AuthLayout from '../layouts/AuthLayout';
 import DashboardLayout from '../layouts/DashboardLayout';
 import ProtectedRoute from './ProtectedRoute';
 import RoleRoute from './RoleRoute';
+import RootRedirect from './RootRedirect';
 
 const L = (el: ReactElement) => (
   <Suspense fallback={<div className="p-8 text-espresso-500">กำลังโหลด...</div>}>{el}</Suspense>
 );
 
-const LandingPage = lazy(() => import('../pages/public/LandingPage'));
 const PartnerSandboxPage = lazy(() => import('../pages/public/PartnerSandboxPage'));
 const LoginPage = lazy(() => import('../pages/auth/LoginPage'));
 const RegisterPage = lazy(() => import('../pages/auth/RegisterPage'));
@@ -32,10 +32,11 @@ const NewJobPage = lazy(() => import('../pages/user/NewJobPage'));
 const TechDashboardPage = lazy(() => import('../pages/technician/TechDashboardPage'));
 
 export const router = createBrowserRouter([
+  // ไม่มีหน้าแรกแล้ว: เข้าเว็บ → หน้า login (ถ้าล็อกอินอยู่แล้ว → แดชบอร์ดตาม role)
+  { path: '/', element: <RootRedirect /> },
   {
     element: <PublicLayout />,
     children: [
-      { path: '/', element: L(<LandingPage />) },
       { path: '/sandbox', element: L(<PartnerSandboxPage />) },
     ],
   },
@@ -85,4 +86,5 @@ export const router = createBrowserRouter([
       },
     ],
   },
+  { path: '*', element: <Navigate to="/" replace /> },
 ]);

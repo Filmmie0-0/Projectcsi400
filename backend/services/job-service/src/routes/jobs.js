@@ -122,33 +122,37 @@ router.get('/api/jobs/:id', async (req, res) => {
   res.json(await getJobDetail(job.job_id));
 });
 
-// NEW: มอบหมายช่าง + นัดวันประเมินหน้างาน (ช่างหัวหน้าเป็นคนประเมิน)
-// สถานะอื่นก่อนจบงาน: เพิ่ม/เปลี่ยนทีมช่างอย่างเดียว
+async function fetchActiveTechnician(id) {
+  const r = await fetch(`${AUTH_SERVICE_URL}/internal/users/${id}`);
+  if (!r.ok) throw new HttpError(r.status === 404 ? 422 : 502, 'TECHNICIAN_NOT_FOUND', `ไม่พบช่างรหัส ${id}`);
+  const u = await r.json();
+  if (u.role !== 'TECHNICIAN' || u.status !== 'ACTIVE') throw new HttpError(422, 'VALIDATION', `${u.fullName} ไม่ใช่ช่างที่ใช้งานอยู่`);
+  return u;
+}
+
+// แอดมินเลือกแค่หัวหน้าช่าง (หัวหน้าช่างเลือกลูกทีมเองผ่าน /team)
+// NEW: เลือกหัวหน้าช่าง + นัดวันประเมินหน้างาน (หัวหน้าช่างเป็นคนประเมิน)
+// สถานะอื่นก่อนจบงาน: เปลี่ยนหัวหน้าช่างอย่างเดียว ลูกทีมเดิมยังอยู่
 router.post('/api/jobs/:id/assign', requireRole('ADMIN'), async (req, res) => {
-  const { technicianIds = [], leadId, scheduledDate, scheduledTime, note } = req.body ?? {};
-  if (!technicianIds.length || !technicianIds.includes(leadId)) throw new HttpError(422, 'VALIDATION', 'เลือกช่างและหัวหน้าช่าง');
+  const { scheduledDate, scheduledTime, note } = req.body ?? {};
+  const leadId = Number(req.body?.leadId);
+  if (!leadId) throw new HttpError(422, 'VALIDATION', 'เลือกหัวหน้าช่าง');
   if (note && String(note).length > 500) throw new HttpError(422, 'VALIDATION', 'หมายเหตุยาวเกิน 500 ตัวอักษร');
 
-  const techs = await Promise.all(technicianIds.map(async (id) => {
-    const r = await fetch(`${AUTH_SERVICE_URL}/internal/users/${id}`);
-    if (!r.ok) throw new HttpError(r.status === 404 ? 422 : 502, 'TECHNICIAN_NOT_FOUND', `ไม่พบช่างรหัส ${id}`);
-    const u = await r.json();
-    if (u.role !== 'TECHNICIAN' || u.status !== 'ACTIVE') throw new HttpError(422, 'VALIDATION', `${u.fullName} ไม่ใช่ช่างที่ใช้งานอยู่`);
-    return u;
-  }));
+  const lead = await fetchActiveTechnician(leadId);
 
   await tx(currentUser(req).id, async (conn) => {
     const job = await loadJob(conn, req.params.id, { lock: true });
     assertStatus(job, 'NEW', 'SURVEY_ASSIGNED', 'SURVEYED', 'QUOTED', 'CONTRACTED', 'IN_PROGRESS');
     if (job.status === 'NEW' && !scheduledDate) throw new HttpError(422, 'VALIDATION', 'กรุณาระบุวันนัดประเมินหน้างาน');
 
-    await conn.query('DELETE FROM job_assignments WHERE job_id = ?', [job.job_id]);
-    for (const t of techs) {
-      await conn.query(
-        'INSERT INTO job_assignments (job_id, technician_id, technician_name, technician_phone, is_lead) VALUES (?, ?, ?, ?, ?)',
-        [job.job_id, t.userId, t.fullName, t.phone ?? null, t.userId === leadId ? 1 : 0],
-      );
-    }
+    // หัวหน้าคนเดิมออกจากงาน, ถ้าหัวหน้าคนใหม่เคยเป็นลูกทีมอยู่แล้วให้เลื่อนขึ้นเป็นหัวหน้า
+    await conn.query('DELETE FROM job_assignments WHERE job_id = ? AND (is_lead = 1 OR technician_id = ?)', [job.job_id, leadId]);
+    await conn.query(
+      'INSERT INTO job_assignments (job_id, technician_id, technician_name, technician_phone, is_lead) VALUES (?, ?, ?, ?, 1)',
+      [job.job_id, lead.userId, lead.fullName, lead.phone ?? null],
+    );
+    await conn.query("UPDATE site_surveys SET technician_id = ? WHERE job_id = ? AND status = 'SCHEDULED'", [leadId, job.job_id]);
     // ส่งให้ระบบจองห้องพักแค่ข้อมูลช่าง + ผู้ประสานงาน เพื่อใช้ติดต่อนัดหมายหน้างาน
     await enqueueWebhook(conn, job, 'job.technicians_assigned', {
       technicians: await technicianContacts(conn, job.job_id),
@@ -163,6 +167,34 @@ router.post('/api/jobs/:id/assign', requireRole('ADMIN'), async (req, res) => {
     }
   });
   await pushJobStatusToPartner(Number(req.params.id), { scheduledDate, scheduledTime, note });
+  res.json(await getJobDetail(Number(req.params.id)));
+});
+
+// หัวหน้าช่างเลือกลูกทีม (ส่งรายชื่อลูกทีมทั้งหมด แทนที่ของเดิม; ว่าง = ทำคนเดียว)
+router.post('/api/jobs/:id/team', requireRole('TECHNICIAN'), async (req, res) => {
+  const user = currentUser(req);
+  const helperIds = [...new Set((req.body?.technicianIds ?? []).map(Number))].filter((id) => id && id !== user.id);
+  const helpers = await Promise.all(helperIds.map(fetchActiveTechnician));
+
+  await tx(user.id, async (conn) => {
+    const job = await loadJob(conn, req.params.id, { lock: true });
+    const a = await assignment(conn, job.job_id, user.id);
+    if (!a?.is_lead) throw new HttpError(403, 'FORBIDDEN', 'เฉพาะหัวหน้าช่างของงานนี้');
+    assertStatus(job, 'SURVEY_ASSIGNED', 'SURVEYED', 'QUOTED', 'CONTRACTED', 'IN_PROGRESS');
+
+    await conn.query('DELETE FROM job_assignments WHERE job_id = ? AND is_lead = 0', [job.job_id]);
+    for (const t of helpers) {
+      await conn.query(
+        'INSERT INTO job_assignments (job_id, technician_id, technician_name, technician_phone, is_lead) VALUES (?, ?, ?, ?, 0)',
+        [job.job_id, t.userId, t.fullName, t.phone ?? null],
+      );
+    }
+    await enqueueWebhook(conn, job, 'job.technicians_assigned', {
+      technicians: await technicianContacts(conn, job.job_id),
+      contact: COMPANY_CONTACT,
+      surveyDate: null,
+    });
+  });
   res.json(await getJobDetail(Number(req.params.id)));
 });
 

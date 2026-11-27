@@ -17,10 +17,9 @@ function defaultTimeForJob(job: JobDetail) {
   return '09:00';
 }
 
-// งานใหม่: เลือกทีมช่าง + หัวหน้าช่าง (คนประเมินหน้างาน) + วันเวลานัด  |  งานที่เดินแล้ว: ปรับทีมช่าง
+// แอดมินเลือกแค่หัวหน้าช่าง (+ วันเวลานัดถ้าเป็นงานใหม่) — หัวหน้าช่างเลือกลูกทีมเองใน TeamModal
 export default function AssignTechnicianModal({ job, open, onClose }: { job: JobDetail; open: boolean; onClose: () => void }) {
   const techs = useTechnicians();
-  const [selected, setSelected] = useState<number[]>(job.assignments.map((a) => a.technicianId));
   const [leadId, setLeadId] = useState<number | null>(job.assignments.find((a) => a.isLead)?.technicianId ?? null);
   const [date, setDate] = useState(job.preferredDate ?? '');
   const [time, setTime] = useState(defaultTimeForJob(job));
@@ -28,18 +27,11 @@ export default function AssignTechnicianModal({ job, open, onClose }: { job: Job
   const assign = useJobMutation(jobService.assign);
   const isNew = job.status === 'NEW';
 
-  const toggle = (id: number) => {
-    const next = selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id];
-    setSelected(next);
-    if (!next.includes(leadId ?? -1)) setLeadId(next[0] ?? null);
-  };
-
   const submit = () =>
     assign.mutate(
       [
         job.jobId,
         {
-          technicianIds: selected,
           leadId: leadId!,
           scheduledDate: isNew ? date : undefined,
           scheduledTime: isNew ? time : undefined,
@@ -53,23 +45,24 @@ export default function AssignTechnicianModal({ job, open, onClose }: { job: Job
     <Modal
       open={open}
       onClose={onClose}
-      title={isNew ? 'มอบหมายช่างและนัดเข้าหน้างาน' : 'ปรับทีมช่าง'}
+      title={isNew ? 'เลือกหัวหน้าช่างและนัดเข้าหน้างาน' : 'เปลี่ยนหัวหน้าช่าง'}
       footer={<Button onClick={submit} disabled={!leadId || (isNew && !date) || assign.isPending}>บันทึก</Button>}
     >
       <div className="space-y-4">
+        <p className="text-xs text-espresso-500">หัวหน้าช่างจะเป็นคนประเมินหน้างานและเลือกลูกทีมเอง</p>
         <div className="space-y-2">
           {(techs.data ?? []).filter((t) => t.status === 'ACTIVE').map((t) => (
             <label key={t.userId} className="flex items-center gap-3 rounded-lg border border-line p-3 text-sm hover:bg-cream-50">
-              <input type="checkbox" checked={selected.includes(t.userId)} onChange={() => toggle(t.userId)} />
+              <input
+                type="checkbox"
+                checked={leadId === t.userId}
+                onChange={() => setLeadId(leadId === t.userId ? null : t.userId)}
+              />
               <div className="flex-1">
                 <p className="font-medium">{t.fullName}</p>
                 <p className="text-xs text-espresso-500">{t.skills} · ค่าแรง {formatCurrency(t.dailyWage ?? 0)}/วัน</p>
               </div>
-              {selected.includes(t.userId) && (
-                <label className="flex items-center gap-1 text-xs">
-                  <input type="radio" name="lead" checked={leadId === t.userId} onChange={() => setLeadId(t.userId)} /> หัวหน้า
-                </label>
-              )}
+              {leadId === t.userId && <span className="text-xs font-medium">หัวหน้า</span>}
             </label>
           ))}
         </div>

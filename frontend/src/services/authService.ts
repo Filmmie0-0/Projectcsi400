@@ -10,6 +10,8 @@ export const authService = {
   me: () => data(apiClient.get<User>('/auth/me')),
 
   listUsers: (role?: string) => data(apiClient.get<User[]>('/users', { params: { role } })),
+  // ช่างที่ใช้งานอยู่ (แอดมิน + ช่าง เรียกได้; ช่างจะไม่เห็นค่าแรง)
+  listTechnicians: () => data(apiClient.get<User[]>('/users/technicians')),
   createUser: (body: UserInput) => data(apiClient.post<User>('/users', body)),
   updateUser: (id: number, body: Partial<Pick<User, 'status' | 'fullName' | 'phone' | 'skills' | 'dailyWage'>>) =>
     data(apiClient.patch<User>(`/users/${id}`, body)),

@@ -13,8 +13,10 @@ export const jobService = {
   listJobs: (params?: { status?: string; type?: string }) => data(apiClient.get<JobListItem[]>('/jobs', { params })),
   getJob: (id: number) => data(apiClient.get<JobDetail>(`/jobs/${id}`)),
   createJob: (body: JobInput) => data(apiClient.post<{ jobId: number; jobCode: string }>('/jobs', body)),
-  assign: (id: number, body: { technicianIds: number[]; leadId: number; scheduledDate?: string; scheduledTime?: string; note?: string }) =>
+  assign: (id: number, body: { leadId: number; scheduledDate?: string; scheduledTime?: string; note?: string }) =>
     data(apiClient.post<JobDetail>(`/jobs/${id}/assign`, body)),
+  // หัวหน้าช่างเลือกลูกทีม (ส่งรายชื่อทั้งหมด แทนที่ของเดิม)
+  setTeam: (id: number, technicianIds: number[]) => data(apiClient.post<JobDetail>(`/jobs/${id}/team`, { technicianIds })),
   submitSurvey: (id: number, body: SurveyInput) => data(apiClient.post<JobDetail>(`/jobs/${id}/surveys`, body)),
   start: (id: number, note?: string) => data(apiClient.post<JobDetail>(`/jobs/${id}/start`, note ? { note } : {})),
   addWorkLog: (id: number, body: WorkLogInput) => data(apiClient.post<JobDetail>(`/jobs/${id}/work-logs`, body)),

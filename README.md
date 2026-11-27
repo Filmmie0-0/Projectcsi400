@@ -38,6 +38,11 @@ npm run dev        # http://localhost:5173
 | partner@dormbook.local | password123 | USER (บัญชีตัวแทนระบบจอง DormBook) |
 | tech1@renocare.local | password123 | TECHNICIAN (ช่างเอก — ก่อ ฉาบ ปูกระเบื้อง ทาสี) |
 | tech2@renocare.local | password123 | TECHNICIAN (ช่างบี — ไฟฟ้า ประปา แอร์) |
+| tech3@renocare.local | password123 | TECHNICIAN (ช่างชัย — งานไม้ ตู้บิวท์อิน เฟอร์นิเจอร์) |
+| tech4@renocare.local | password123 | TECHNICIAN (ช่างดำ — ทาสี ฝ้าเพดาน ยิปซัม) |
+| tech5@renocare.local | password123 | TECHNICIAN (ช่างต้น — หลังคา กันซึม รางน้ำ) |
+| tech6@renocare.local | password123 | TECHNICIAN (ช่างนนท์ — แอร์ เครื่องใช้ไฟฟ้า) |
+| tech7@renocare.local | password123 | TECHNICIAN (ช่างปอ — ประปา สุขภัณฑ์) |
 
 Partner API key เดโม: `dbk_live_demo_7f3a9c2e1b` — ลองได้ที่หน้า `/sandbox` (จำลองระบบจองห้องพักของเพื่อน รับ webhook จริง)
 
@@ -129,7 +134,7 @@ cd .. && node portable/build-docker.mjs
 
 - `backend/database/services/` — schema + ข้อมูลเดโมแยกตาม service (`01_auth_db`, `02_job_db`, `03_inventory_db`)
 - `backend/services/` — `gateway`, `auth-service`, `job-service`, `inventory-service`
-- `frontend/src/pages` — `public` (landing, partner sandbox), `auth`, `admin`, `user`, `technician` และหน้าที่ใช้ร่วมกันหลาย role: `jobs`, `billing`, `inventory`
+- `frontend/src/pages` — `public` (partner sandbox), `auth`, `admin`, `user`, `technician` และหน้าที่ใช้ร่วมกันหลาย role: `jobs`, `billing`, `inventory`
 - `frontend/src/components` — `ui/` (design system), `common/`, `features/job`, `features/inventory`
 - `frontend/src/services` — API client แยกตาม service (`authService`, `jobService`, `inventoryService`, `partnerService`)
 - `frontend/src/hooks` — React Query hooks แยกตาม service

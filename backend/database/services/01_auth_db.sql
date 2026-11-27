@@ -44,8 +44,18 @@ INSERT INTO users (user_id, email, password_hash, role, full_name, phone) VALUES
   (2, 'owner@renocare.local',   '$2a$10$SZ2Fnqt5c6rlXSZMwgXDie0QvNOz7i8Jx114DnehlcvyJ8qPDaSTy', 'USER',       'สมหญิง เจ้าของหอ',        '0811111111'),
   (3, 'partner@dormbook.local', '$2a$10$SZ2Fnqt5c6rlXSZMwgXDie0QvNOz7i8Jx114DnehlcvyJ8qPDaSTy', 'USER',       'DormBook (ระบบจองห้องพัก)', '0822222222'),
   (4, 'tech1@renocare.local',   '$2a$10$SZ2Fnqt5c6rlXSZMwgXDie0QvNOz7i8Jx114DnehlcvyJ8qPDaSTy', 'TECHNICIAN', 'ช่างเอก งานโครงสร้าง',     '0833333333'),
-  (5, 'tech2@renocare.local',   '$2a$10$SZ2Fnqt5c6rlXSZMwgXDie0QvNOz7i8Jx114DnehlcvyJ8qPDaSTy', 'TECHNICIAN', 'ช่างบี ไฟฟ้า-ประปา',       '0844444444');
+  (5, 'tech2@renocare.local',   '$2a$10$SZ2Fnqt5c6rlXSZMwgXDie0QvNOz7i8Jx114DnehlcvyJ8qPDaSTy', 'TECHNICIAN', 'ช่างบี ไฟฟ้า-ประปา',       '0844444444'),
+  (6, 'tech3@renocare.local',   '$2a$10$SZ2Fnqt5c6rlXSZMwgXDie0QvNOz7i8Jx114DnehlcvyJ8qPDaSTy', 'TECHNICIAN', 'ช่างชัย งานไม้-เฟอร์นิเจอร์', '0855555555'),
+  (7, 'tech4@renocare.local',   '$2a$10$SZ2Fnqt5c6rlXSZMwgXDie0QvNOz7i8Jx114DnehlcvyJ8qPDaSTy', 'TECHNICIAN', 'ช่างดำ ทาสี-ฝ้า',          '0866666666'),
+  (8, 'tech5@renocare.local',   '$2a$10$SZ2Fnqt5c6rlXSZMwgXDie0QvNOz7i8Jx114DnehlcvyJ8qPDaSTy', 'TECHNICIAN', 'ช่างต้น หลังคา-กันซึม',     '0877777777'),
+  (9, 'tech6@renocare.local',   '$2a$10$SZ2Fnqt5c6rlXSZMwgXDie0QvNOz7i8Jx114DnehlcvyJ8qPDaSTy', 'TECHNICIAN', 'ช่างนนท์ แอร์-เครื่องใช้ไฟฟ้า', '0888888888'),
+  (10, 'tech7@renocare.local',  '$2a$10$SZ2Fnqt5c6rlXSZMwgXDie0QvNOz7i8Jx114DnehlcvyJ8qPDaSTy', 'TECHNICIAN', 'ช่างปอ ประปา-สุขภัณฑ์',     '0899000000');
 
 INSERT INTO technician_profiles (user_id, skills, daily_wage) VALUES
   (4, 'ก่อ ฉาบ ปูกระเบื้อง ทาสี', 800.00),
-  (5, 'ไฟฟ้า ประปา แอร์',        900.00);
+  (5, 'ไฟฟ้า ประปา แอร์',        900.00),
+  (6, 'งานไม้ ตู้บิวท์อิน เฟอร์นิเจอร์', 850.00),
+  (7, 'ทาสี ฝ้าเพดาน ยิปซัม',     750.00),
+  (8, 'หลังคา กันซึม รางน้ำ',     850.00),
+  (9, 'ล้างแอร์ ติดตั้งแอร์ เครื่องใช้ไฟฟ้า', 900.00),
+  (10, 'ประปา สุขภัณฑ์ ท่อตัน',    800.00);

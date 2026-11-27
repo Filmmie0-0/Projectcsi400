@@ -8,6 +8,7 @@ import StatusBadge from '../../components/common/StatusBadge';
 import QueryState, { ErrorText } from '../../components/common/QueryState';
 import JobStatusStepper from '../../components/features/job/JobStatusStepper';
 import AssignTechnicianModal from '../../components/features/job/AssignTechnicianModal';
+import TeamModal from '../../components/features/job/TeamModal';
 import SurveySection from '../../components/features/job/SurveySection';
 import ContractSection from '../../components/features/job/ContractSection';
 import OwnerApprovalCard from '../../components/features/job/OwnerApprovalCard';
@@ -77,6 +78,7 @@ function Header({ job }: { job: JobDetail }) {
 function Actions({ job }: { job: JobDetail }) {
   const user = useAuthStore((s) => s.user!);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [teamOpen, setTeamOpen] = useState(false);
   const start = useJobMutation(jobService.start);
   const complete = useJobMutation(jobService.complete);
   const cancel = useJobMutation(jobService.cancel);
@@ -93,8 +95,11 @@ function Actions({ job }: { job: JobDetail }) {
   const buttons = [
     isAdmin && open && (
       <Button key="assign" variant={job.status === 'NEW' ? 'primary' : 'secondary'} onClick={() => setAssignOpen(true)}>
-        {job.status === 'NEW' ? 'มอบหมายช่าง & นัดประเมิน' : 'ปรับทีมช่าง'}
+        {job.status === 'NEW' ? 'เลือกหัวหน้าช่าง & นัดประเมิน' : 'เปลี่ยนหัวหน้าช่าง'}
       </Button>
+    ),
+    isLead && open && job.status !== 'NEW' && (
+      <Button key="team" variant="secondary" onClick={() => setTeamOpen(true)}>เลือกลูกทีมช่าง</Button>
     ),
     canStart && (
       <Button key="start" onClick={() => start.mutate([job.jobId])} disabled={start.isPending}>
@@ -165,6 +170,7 @@ function Actions({ job }: { job: JobDetail }) {
       <div className="flex flex-col gap-2">{buttons}</div>
       <ErrorText error={start.error ?? complete.error ?? cancel.error} />
       {assignOpen && <AssignTechnicianModal job={job} open onClose={() => setAssignOpen(false)} />}
+      {teamOpen && <TeamModal job={job} leadId={user.userId} open onClose={() => setTeamOpen(false)} />}
     </Card>
   );
 }
@@ -247,7 +253,7 @@ function nextStepHint(job: JobDetail, role: string) {
     return ({ ADMIN: 'ช่างประเมินว่าไม่ต้องซ่อม — กด "ปิดงาน (ไม่ซ่อม)"', USER: 'ช่างประเมินว่าไม่ต้องซ่อม รอแอดมินปิดงาน', TECHNICIAN: 'ประเมินว่าไม่ต้องซ่อม รอแอดมินปิดงาน' } as Record<string, string>)[role];
   }
   const hints: Partial<Record<JobDetail['status'], Record<string, string>>> = {
-    NEW: { ADMIN: 'มอบหมายช่างและนัดวันประเมินหน้างาน', USER: 'รอแอดมินนัดช่างเข้าประเมิน' },
+    NEW: { ADMIN: 'เลือกหัวหน้าช่างและนัดวันประเมินหน้างาน', USER: 'รอแอดมินนัดช่างเข้าประเมิน' },
     SURVEY_ASSIGNED: {
       TECHNICIAN: job.remoteJobId ? 'เข้าหน้างานตามนัด: บันทึกผลประเมิน หรือกด "เริ่มซ่อมงาน" เพื่อแจ้งหอพักว่ากำลังซ่อม' : 'เข้าหน้างานตามนัดแล้วบันทึกผลประเมิน',
       ADMIN: 'รอช่างส่งผลประเมินหรือเริ่มซ่อมงาน',

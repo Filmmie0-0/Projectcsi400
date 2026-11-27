@@ -6,6 +6,8 @@ export const userKeys = { list: (role?: Role) => ['users', role ?? 'all'] as con
 
 export const useUsers = (role?: Role) => useQuery({ queryKey: userKeys.list(role), queryFn: () => authService.listUsers(role) });
 export const useTechnicians = () => useUsers('TECHNICIAN');
+export const useActiveTechnicians = () =>
+  useQuery({ queryKey: ['users', 'technicians', 'active'], queryFn: () => authService.listTechnicians() });
 
 export function useCreateUser() {
   const qc = useQueryClient();

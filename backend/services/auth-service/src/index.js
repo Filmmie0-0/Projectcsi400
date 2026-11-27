@@ -143,6 +143,19 @@ app.get('/api/auth/me', async (req, res) => {
   res.json(publicUser(user));
 });
 
+// รายชื่อช่างที่ใช้งานอยู่: แอดมินใช้เลือกหัวหน้าช่าง, หัวหน้าช่างใช้เลือกลูกทีม (ช่างไม่เห็นค่าแรงของคนอื่น)
+app.get('/api/users/technicians', requireRole('ADMIN', 'TECHNICIAN'), async (req, res) => {
+  const [rows] = await pool.query(
+    `SELECT ${USER_COLUMNS} FROM users u LEFT JOIN technician_profiles t ON t.user_id = u.user_id
+     WHERE u.role = 'TECHNICIAN' AND u.status = 'ACTIVE' ORDER BY u.full_name`,
+  );
+  const isAdmin = currentUser(req).role === 'ADMIN';
+  res.json(rows.map((r) => {
+    const u = publicUser(r);
+    return isAdmin ? u : { userId: u.userId, fullName: u.fullName, phone: u.phone, role: u.role, status: u.status, skills: u.skills };
+  }));
+});
+
 // ── Admin: จัดการผู้ใช้ (/api/users) ──
 app.get('/api/users', requireRole('ADMIN'), async (req, res) => {
   const { role } = req.query;
